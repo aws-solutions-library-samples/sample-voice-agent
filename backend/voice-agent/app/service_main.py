@@ -37,11 +37,8 @@ logging.basicConfig(
 # Our MetricsObserver already captures these metrics as structured JSON.
 logging.getLogger("pipecat").setLevel(logging.WARNING)
 # Suppress httpx INFO logs (e.g., "HTTP Request: POST http://...").
-# A2A tool calls are already captured in our structured logs.
+# Tool calls are already captured in our structured logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
-# Suppress A2A SDK task lifecycle logs ("New task created with id: ...").
-# Our a2a/tool_adapter.py logs these events with structured context.
-logging.getLogger("a2a").setLevel(logging.WARNING)
 
 # Suppress pipecat's loguru-based DEBUG logs (loguru ignores stdlib logging levels).
 # These are pipe-linking/VAD-loading messages that add ~48 lines of noise per call.
@@ -140,12 +137,7 @@ from app.secrets_loader import load_secrets_from_aws
 from app.observability import create_metrics_collector, EMFLogger
 from app.session_tracker import SessionTracker, get_ecs_task_id
 from app.task_protection import TaskProtection
-from app.services import load_config, AppConfig, get_config_service
-
-# Global A2A registry - initialized in main() when capability registry is enabled
-_a2a_registry: Optional[Any] = None
-_a2a_poll_interval: int = 30
-_config_refresh_task: Optional[asyncio.Task] = None
+from app.services import load_config, AppConfig
 
 
 class PipelineManager:
@@ -361,9 +353,7 @@ class PipelineManager:
             )
 
             # Create the pipeline with metrics collector
-            task, transport = await create_voice_pipeline(
-                config, collector, a2a_registry=_a2a_registry
-            )
+            task, transport = await create_voice_pipeline(config, collector)
 
             # Run the pipeline
             runner = PipelineRunner()
@@ -561,58 +551,6 @@ def create_app() -> web.Application:
     return app
 
 
-async def _config_refresh_loop(region: str) -> None:
-    """Periodically refresh SSM config and lazily init/teardown the A2A registry."""
-    global _a2a_registry, _a2a_poll_interval
-
-    while True:
-        await asyncio.sleep(30)
-        try:
-            config_service = get_config_service()
-            await config_service.refresh()
-            cfg = config_service.config
-
-            want_registry = (
-                cfg.features.enable_capability_registry and bool(cfg.a2a.namespace)
-            )
-            have_registry = _a2a_registry is not None
-
-            if want_registry and not have_registry:
-                from app.a2a import AgentRegistry
-
-                _a2a_registry = AgentRegistry(
-                    namespace=cfg.a2a.namespace,
-                    region=region,
-                    a2a_timeout=cfg.a2a.tool_timeout_seconds,
-                )
-                _a2a_poll_interval = cfg.a2a.poll_interval_seconds
-                await _a2a_registry.start_polling(
-                    interval_seconds=_a2a_poll_interval
-                )
-                logger.info(
-                    "a2a_registry_lazy_initialized",
-                    namespace=cfg.a2a.namespace,
-                    poll_interval=_a2a_poll_interval,
-                )
-
-            elif not want_registry and have_registry:
-                try:
-                    await _a2a_registry.stop_polling()
-                except Exception:
-                    pass
-                _a2a_registry = None
-                logger.info("a2a_registry_torn_down")
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.warning(
-                "config_refresh_loop_error",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-
-
 async def run_server(port: int):
     """Run the HTTP server."""
     app = create_app()
@@ -629,18 +567,6 @@ async def run_server(port: int):
     if pipeline_manager:
         await pipeline_manager.start_heartbeat_loop()
 
-    # Start A2A capability registry polling if configured
-    if _a2a_registry:
-        try:
-            await _a2a_registry.start_polling(interval_seconds=_a2a_poll_interval)
-        except Exception as e:
-            logger.error("a2a_registry_start_failed", error=str(e))
-
-    # Start config refresh loop to pick up SSM changes at runtime
-    global _config_refresh_task
-    region = os.environ.get("AWS_REGION", "us-east-1")
-    _config_refresh_task = asyncio.create_task(_config_refresh_loop(region=region))
-
     logger.info(
         "service_ready",
         port=port,
@@ -654,15 +580,6 @@ async def run_server(port: int):
     except asyncio.CancelledError:
         pass
     finally:
-        # Stop config refresh loop
-        if _config_refresh_task:
-            _config_refresh_task.cancel()
-        # Stop A2A registry polling
-        if _a2a_registry:
-            try:
-                await _a2a_registry.stop_polling()
-            except Exception:
-                pass
         await runner.cleanup()
 
 
@@ -692,29 +609,6 @@ def main():
     # Initialize pipeline manager with config
     global pipeline_manager
     pipeline_manager = PipelineManager(config)
-
-    # Initialize A2A capability registry if enabled
-    global _a2a_registry, _a2a_poll_interval
-    if config.features.enable_capability_registry and config.a2a.namespace:
-        from app.a2a import AgentRegistry
-
-        _a2a_registry = AgentRegistry(
-            namespace=config.a2a.namespace,
-            region=region,
-            a2a_timeout=config.a2a.tool_timeout_seconds,
-        )
-        _a2a_poll_interval = config.a2a.poll_interval_seconds
-        logger.info(
-            "a2a_registry_initialized",
-            namespace=config.a2a.namespace,
-            poll_interval=config.a2a.poll_interval_seconds,
-            tool_timeout=config.a2a.tool_timeout_seconds,
-        )
-    elif config.features.enable_capability_registry:
-        logger.warning(
-            "a2a_registry_not_initialized",
-            reason="enable_capability_registry is true but no namespace configured",
-        )
 
     # Load secrets from AWS
     secrets_loaded = load_secrets_from_aws()

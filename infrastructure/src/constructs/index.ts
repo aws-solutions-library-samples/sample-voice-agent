@@ -1,9 +1,5 @@
 export { VpcConstruct, VpcConstructProps } from './vpc-construct';
 export { SecretsConstruct, SecretsConstructProps } from './secrets-construct';
-export {
-  SageMakerEndpointConstruct,
-  SageMakerEndpointConstructProps,
-} from './sagemaker-endpoint-construct';
 export { WebhookApiConstruct, WebhookApiConstructProps } from './webhook-api-construct';
 export {
   VoiceAgentMonitoringConstruct,
@@ -17,11 +13,3 @@ export {
   SessionCounterLambdaConstruct,
   SessionCounterLambdaConstructProps,
 } from './session-counter-lambda-construct';
-export {
-  KnowledgeBaseConstruct,
-  KnowledgeBaseConstructProps,
-} from './knowledge-base-construct';
-export {
-  CapabilityAgentConstruct,
-  CapabilityAgentConstructProps,
-} from './capability-agent-construct';

@@ -42,9 +42,6 @@ class TestPipelineManagerDraining:
         config.knowledge_base = MagicMock()
         config.knowledge_base.id = None
         config.features = MagicMock()
-        config.features.enable_capability_registry = False
-        config.a2a = MagicMock()
-        config.a2a.namespace = None
         return config
 
     def test_initial_state_not_draining(self, mock_config):
@@ -129,9 +126,6 @@ class TestPipelineManagerProtection:
         config.knowledge_base = MagicMock()
         config.knowledge_base.id = None
         config.features = MagicMock()
-        config.features.enable_capability_registry = False
-        config.a2a = MagicMock()
-        config.a2a.namespace = None
         return config
 
     @pytest.mark.asyncio
@@ -241,9 +235,6 @@ class TestGetStatus:
         config.knowledge_base = MagicMock()
         config.knowledge_base.id = None
         config.features = MagicMock()
-        config.features.enable_capability_registry = False
-        config.a2a = MagicMock()
-        config.a2a.namespace = None
         return config
 
     def test_status_includes_scaling_fields(self, mock_config):
@@ -301,9 +292,6 @@ class TestReadyEndpoint:
         mock_config.knowledge_base = MagicMock()
         mock_config.knowledge_base.id = None
         mock_config.features = MagicMock()
-        mock_config.features.enable_capability_registry = False
-        mock_config.a2a = MagicMock()
-        mock_config.a2a.namespace = None
 
         sm.pipeline_manager = PipelineManager(mock_config)
 

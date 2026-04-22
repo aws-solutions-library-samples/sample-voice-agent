@@ -1,10 +1,5 @@
 export { NetworkStack, NetworkStackProps } from './network-stack';
 export { StorageStack, StorageStackProps } from './storage-stack';
-export { SageMakerStack, SageMakerStackProps } from './sagemaker-stack';
 export { SageMakerStubStack, SageMakerStubStackProps } from './sagemaker-stub-stack';
-export { KnowledgeBaseStack, KnowledgeBaseStackProps } from './knowledge-base-stack';
 export { EcsStack, EcsStackProps } from './ecs-stack';
 export { BotRunnerStack, BotRunnerStackProps } from './bot-runner-stack';
-export { CrmStack, CrmStackProps } from './crm-stack';
-export { KbAgentStack, KbAgentStackProps } from './kb-agent-stack';
-export { CrmAgentStack, CrmAgentStackProps } from './crm-agent-stack';
