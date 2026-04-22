@@ -44,17 +44,7 @@ class FeatureFlags:
     enable_filler_phrases: bool = False
     enable_conversation_logging: bool = True
     enable_audio_quality_monitoring: bool = True
-    enable_capability_registry: bool = False
     disabled_tools: str = ""  # Comma-separated list of tool names to disable
-
-
-@dataclass
-class A2AConfig:
-    """A2A capability registry configuration."""
-
-    namespace: str = ""
-    poll_interval_seconds: int = 30
-    tool_timeout_seconds: int = 30
 
 
 @dataclass
@@ -78,7 +68,6 @@ class AppConfig:
     providers: ProviderConfig = field(default_factory=ProviderConfig)
     features: FeatureFlags = field(default_factory=FeatureFlags)
     llm: LLMConfig = field(default_factory=LLMConfig)
-    a2a: A2AConfig = field(default_factory=A2AConfig)
 
 
 class ConfigService:
@@ -101,7 +90,6 @@ class ConfigService:
     CONFIG_PATH = f"{BASE_PATH}/config"
     SESSIONS_PATH = f"{BASE_PATH}/sessions"
     STORAGE_PATH = f"{BASE_PATH}/storage"
-    A2A_PATH = f"{BASE_PATH}/a2a"
 
     def __init__(self, region: Optional[str] = None):
         """Initialize the ConfigService.
@@ -263,12 +251,7 @@ class ConfigService:
             f"{self.CONFIG_PATH}/enable-filler-phrases",
             f"{self.CONFIG_PATH}/enable-conversation-logging",
             f"{self.CONFIG_PATH}/enable-audio-quality-monitoring",
-            # Capability Registry (A2A)
-            f"{self.CONFIG_PATH}/enable-capability-registry",
             f"{self.CONFIG_PATH}/disabled-tools",
-            f"{self.A2A_PATH}/namespace",
-            f"{self.A2A_PATH}/poll-interval-seconds",
-            f"{self.A2A_PATH}/tool-timeout-seconds",
             # LLM
             f"{self.CONFIG_PATH}/llm-model-id",
             # Infrastructure
@@ -317,23 +300,7 @@ class ConfigService:
                 f"{self.CONFIG_PATH}/enable-audio-quality-monitoring", "true"
             ).lower()
             == "true",
-            enable_capability_registry=params.get(
-                f"{self.CONFIG_PATH}/enable-capability-registry", "false"
-            ).lower()
-            == "true",
             disabled_tools=params.get(f"{self.CONFIG_PATH}/disabled-tools", ""),
-        )
-
-        # A2A capability registry config
-        a2a_namespace_default = os.environ.get("A2A_NAMESPACE", "")
-        a2a_config = A2AConfig(
-            namespace=params.get(f"{self.A2A_PATH}/namespace", a2a_namespace_default),
-            poll_interval_seconds=int(
-                params.get(f"{self.A2A_PATH}/poll-interval-seconds", "30")
-            ),
-            tool_timeout_seconds=int(
-                params.get(f"{self.A2A_PATH}/tool-timeout-seconds", "30")
-            ),
         )
 
         # LLM config - SSM parameter with env var fallback
@@ -356,7 +323,6 @@ class ConfigService:
             providers=provider_config,
             features=features,
             llm=llm_config,
-            a2a=a2a_config,
         )
 
         return config
@@ -391,11 +357,6 @@ class ConfigService:
     def llm(self) -> LLMConfig:
         """Get LLM configuration."""
         return self.config.llm
-
-    @property
-    def a2a(self) -> A2AConfig:
-        """Get A2A capability registry configuration."""
-        return self.config.a2a
 
     def is_configured(self) -> bool:
         """Check if configuration has been loaded."""

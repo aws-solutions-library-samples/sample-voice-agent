@@ -9,7 +9,6 @@ from app.services.config_service import (
     ProviderConfig,
     FeatureFlags,
     LLMConfig,
-    A2AConfig,
     get_config_service,
     load_config,
 )
@@ -24,7 +23,6 @@ __all__ = [
     "ProviderConfig",
     "FeatureFlags",
     "LLMConfig",
-    "A2AConfig",
     "get_config_service",
     "load_config",
 ]

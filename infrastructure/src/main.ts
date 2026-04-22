@@ -5,14 +5,9 @@ import { loadConfig } from './config';
 import {
   NetworkStack,
   StorageStack,
-  SageMakerStack,
   SageMakerStubStack,
-  KnowledgeBaseStack,
   EcsStack,
   BotRunnerStack,
-  CrmStack,
-  KbAgentStack,
-  CrmAgentStack,
 } from './stacks';
 
 const app = new cdk.App();
@@ -42,22 +37,24 @@ const env: cdk.Environment = {
  * 2. Storage Stack (depends on Network for VPC endpoints)
  *    └── Writes: Secret ARN, KMS Key ARN
  *
- * 3. SageMaker Stack (depends on Network) - OPTIONAL
- *    └── Reads: VPC ID, SageMaker SG ID
- *    └── Writes: STT/TTS Endpoint Names
- *    └── Skipped when USE_CLOUD_APIS=true
+ * 3. SageMaker Stub Stack — cloud-API mode only
+ *    └── Writes stub SSM params for STT/TTS endpoint names
+ *    └── Downstream stacks read these params but the values are
+ *        placeholders; the Pipecat runtime uses cloud APIs
+ *        (Deepgram STT + Cartesia TTS) configured via Secrets
+ *        Manager, not the stub values.
+ *    └── This fork removed the real SageMakerStack (self-hosted
+ *        model endpoints). If you ever need self-hosted mode,
+ *        restore SageMakerStack from upstream and branch on
+ *        `config.sageMakerEnabled` again.
  *
- * 4. Knowledge Base Stack (no dependencies on other app stacks)
- *    └── Creates: KB, S3 bucket, data source
- *    └── Writes: KB ID, KB ARN, Bucket name to SSM
- *    └── Can be deployed independently for document updates
- *
- * 5. ECS Stack (depends on Network, Storage, Knowledge Base)
- *    └── Reads: VPC ID, Subnet IDs, Secret ARN, KB ID/ARN
+ * 4. ECS Stack (depends on Network, Storage, SageMaker stub)
+ *    └── Reads: VPC ID, Subnet IDs, Secret ARN, STT/TTS endpoint
+ *         name params (stub values in cloud-API mode)
  *    └── Writes: Cluster ARN, Task Definition ARN, Task SG ID
  *    └── Runs pipecat with asyncio.run() - the pattern pipecat expects
  *
- * 6. BotRunner Stack (depends on Network, Storage, SageMaker, ECS)
+ * 5. BotRunner Stack (depends on Network, Storage, SageMaker, ECS)
  *    └── Reads: VPC ID, Subnet IDs, Lambda SG ID, Secret ARN, ECS ARNs
  *    └── Writes: Webhook URL
  */
@@ -87,45 +84,19 @@ const storageStack = new StorageStack(app, 'VoiceAgentStorage', {
 });
 storageStack.addDependency(networkStack);
 
-// Phase 4: SageMaker Stack (or Stub for cloud API mode)
-// Use stub when USE_CLOUD_APIS=true to skip SageMaker deployment
-const useCloudApis = process.env.USE_CLOUD_APIS === 'true';
-const sagemakerStack = useCloudApis
-  ? new SageMakerStubStack(app, 'VoiceAgentSageMaker', {
-      env,
-      config,
-      description: 'Voice Agent POC - Cloud API mode (SageMaker skipped)',
-      tags: {
-        Project: config.projectName,
-        Environment: config.environment,
-        Phase: '4',
-        Mode: 'cloud-api',
-      },
-    })
-  : new SageMakerStack(app, 'VoiceAgentSageMaker', {
-      env,
-      config,
-      description: 'Voice Agent POC - SageMaker endpoints (Deepgram STT/TTS)',
-      tags: {
-        Project: config.projectName,
-        Environment: config.environment,
-        Phase: '4',
-      },
-    });
-sagemakerStack.addDependency(networkStack);
-
-// Phase 5: Knowledge Base Stack (standalone for RAG)
-// Deployed separately so document updates don't affect compute
-const knowledgeBaseStack = new KnowledgeBaseStack(app, 'VoiceAgentKnowledgeBase', {
+// Phase 4: SageMaker Stub Stack (cloud-API mode only in this fork)
+const sagemakerStack = new SageMakerStubStack(app, 'VoiceAgentSageMaker', {
   env,
   config,
-  description: 'Voice Agent POC - Bedrock Knowledge Base for RAG',
+  description: 'Voice Agent POC - Cloud API mode (SageMaker skipped)',
   tags: {
     Project: config.projectName,
     Environment: config.environment,
-    Phase: '5',
+    Phase: '4',
+    Mode: 'cloud-api',
   },
 });
+sagemakerStack.addDependency(networkStack);
 
 // Phase 6: ECS Stack
 // ECS Fargate properly supports pipecat's async patterns
@@ -141,7 +112,6 @@ const ecsStack = new EcsStack(app, 'VoiceAgentEcs', {
 });
 ecsStack.addDependency(networkStack);
 ecsStack.addDependency(storageStack);
-ecsStack.addDependency(knowledgeBaseStack);
 
 // Phase 7: Bot Runner Stack
 const botrunnerStack = new BotRunnerStack(app, 'VoiceAgentBotRunner', {
@@ -158,48 +128,5 @@ botrunnerStack.addDependency(networkStack);
 botrunnerStack.addDependency(storageStack);
 botrunnerStack.addDependency(sagemakerStack);
 botrunnerStack.addDependency(ecsStack);
-
-// Phase 8: CRM Stack (standalone - can be deployed independently)
-// Provides customer data, cases, and interaction tracking for voice agent
-const crmStack = new CrmStack(app, 'VoiceAgentCRM', {
-  env,
-  config,
-  description: 'Voice Agent POC - Simple CRM System (DynamoDB + API Gateway)',
-  tags: {
-    Project: config.projectName,
-    Environment: config.environment,
-    Phase: '8',
-  },
-});
-
-// Phase 9: KB Agent Stack (capability agent - depends on ECS + KB)
-// Knowledge Base search as an independent A2A capability agent
-const kbAgentStack = new KbAgentStack(app, 'VoiceAgentKbAgent', {
-  env,
-  config,
-  description: 'Voice Agent POC - Knowledge Base A2A Capability Agent',
-  tags: {
-    Project: config.projectName,
-    Environment: config.environment,
-    Phase: '9',
-  },
-});
-kbAgentStack.addDependency(ecsStack);
-kbAgentStack.addDependency(knowledgeBaseStack);
-
-// Phase 10: CRM Agent Stack (capability agent - depends on ECS + CRM)
-// CRM operations as an independent A2A capability agent
-const crmAgentStack = new CrmAgentStack(app, 'VoiceAgentCrmAgent', {
-  env,
-  config,
-  description: 'Voice Agent POC - CRM A2A Capability Agent',
-  tags: {
-    Project: config.projectName,
-    Environment: config.environment,
-    Phase: '10',
-  },
-});
-crmAgentStack.addDependency(ecsStack);
-crmAgentStack.addDependency(crmStack);
 
 app.synth();

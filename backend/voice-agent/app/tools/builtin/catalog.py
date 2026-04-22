@@ -11,10 +11,9 @@ To add a new local tool:
     3. Import and add it to ALL_LOCAL_TOOLS below
     4. The capability system handles the rest -- no pipeline code changes needed
 
-Note: A2A (remote) tools are discovered dynamically via CloudMap and are
-NOT listed here. This catalog is strictly for tools that run inside the
-voice agent container and may need direct access to pipeline internals
-(transport, SIP session, etc.).
+This catalog is strictly for tools that run inside the voice agent
+container and may need direct access to pipeline internals (transport,
+SIP session, etc.).
 """
 
 from typing import List

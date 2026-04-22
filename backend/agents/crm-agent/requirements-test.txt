@@ -1,4 +1,0 @@
-# Test dependencies for CRM agent
--r requirements.txt
-pytest>=8.0.0
-requests-mock>=1.11.0

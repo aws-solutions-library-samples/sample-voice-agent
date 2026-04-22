@@ -1,5 +1,41 @@
 # Guidance for voice agents on AWS
 
+## Fork Notice
+
+This repository is a Cosentus fork of
+[aws-solutions-library-samples/sample-voice-agent](https://github.com/aws-solutions-library-samples/sample-voice-agent).
+The upstream SHA we forked from is
+[`15fc079`](https://github.com/aws-solutions-library-samples/sample-voice-agent/commit/15fc0798cf70bd91f2a24ed564de65af10e023d4).
+
+Relative to upstream, this fork has **removed**:
+
+- **A2A capability agents** (knowledge-base-agent, crm-agent, all A2A
+  runtime wiring in `service_main.py`, `pipeline_ecs.py`, and
+  supporting modules).
+- **SageMaker self-hosted STT/TTS mode** — the real `SageMakerStack` is
+  gone; the `SageMakerStubStack` remains so downstream stacks continue
+  to read their SSM parameters (they're placeholder values in cloud-API
+  mode).
+- **Upstream demo stacks** (`CrmStack`, `KnowledgeBaseStack`,
+  `KbAgentStack`, `CrmAgentStack`) and their constructs / tests.
+- **Claude Code skills** specific to capability-agent and SageMaker
+  workflows (`create-capability-agent`, `deploy-capability-agents`,
+  `deploy-sagemaker`).
+
+What stays from upstream and still works end-to-end:
+
+- **ECS Fargate task** running Pipecat with task scale-in protection,
+  graceful drain, session tracker, and CloudWatch observability.
+- **Daily.co WebRTC transport** for phone + browser inputs.
+- **Bedrock Claude LLM**, **Deepgram STT**, **Cartesia TTS** (cloud
+  APIs only — this fork does not deploy self-hosted model endpoints).
+- **Other Claude Code skills**: `deploy-cloud-api`, `configure-daily`,
+  `verify-deployment`, `destroy-project`, `create-local-tool`.
+
+The baseline cleanup was intentionally mechanical — no Cosentus-specific
+business logic, agent prompts, or integrations have been added yet.
+Those land in follow-on commits on top of this baseline.
+
 ## Table of Contents
 
 1. [Overview](#overview)

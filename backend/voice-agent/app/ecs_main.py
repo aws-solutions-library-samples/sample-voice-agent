@@ -62,7 +62,6 @@ logging.basicConfig(
 # Our MetricsObserver already captures these metrics as structured JSON.
 logging.getLogger("pipecat").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("a2a").setLevel(logging.WARNING)
 
 # Suppress pipecat's loguru-based DEBUG logs (loguru ignores stdlib logging levels).
 from loguru import logger as _loguru_logger
