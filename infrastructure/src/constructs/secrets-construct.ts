@@ -39,16 +39,16 @@ export class SecretsConstruct extends Construct {
       removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
-    // Secret for API keys (Daily, Deepgram, Cartesia)
+    // Secret for API keys (Daily, Deepgram, ElevenLabs)
     // Actual values populated manually after deployment
     this.apiKeySecret = new secretsmanager.Secret(this, 'ApiKeySecret', {
-      description: `API keys for external services (Daily, Deepgram, Cartesia) - ${props.environment}`,
+      description: `API keys for external services (Daily, Deepgram, ElevenLabs) - ${props.environment}`,
       encryptionKey: this.encryptionKey,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({
           DAILY_API_KEY: 'PLACEHOLDER_REPLACE_AFTER_DEPLOY',
           DEEPGRAM_API_KEY: 'PLACEHOLDER_REPLACE_AFTER_DEPLOY',
-          CARTESIA_API_KEY: 'PLACEHOLDER_REPLACE_AFTER_DEPLOY',
+          ELEVENLABS_API_KEY: 'PLACEHOLDER_REPLACE_AFTER_DEPLOY',
         }),
         generateStringKey: 'generated_field', // Required but unused
       },

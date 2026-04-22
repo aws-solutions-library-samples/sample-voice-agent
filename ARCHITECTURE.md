@@ -69,9 +69,9 @@ The system also supports cloud APIs for development/testing:
 | Mode | STT | TTS | Use Case |
 |------|-----|-----|----------|
 | **SageMaker (production)** | Deepgram Nova-3 on SageMaker | Deepgram Aura-2 on SageMaker | Data stays in VPC, no API keys |
-| **Cloud API (development)** | Deepgram Cloud WebSocket | Cartesia Cloud HTTP | Quick setup, no GPU quota needed |
+| **Cloud API (development)** | Deepgram Cloud WebSocket | ElevenLabs Cloud WebSocket | Quick setup, no GPU quota needed |
 
-Set via `STT_PROVIDER` and `TTS_PROVIDER` environment variables (`sagemaker` or `deepgram`/`cartesia`).
+Set via `STT_PROVIDER` and `TTS_PROVIDER` environment variables (`sagemaker` or `deepgram`/`elevenlabs`).
 
 ### Technology Stack
 
@@ -242,7 +242,7 @@ Manages secrets and encryption:
 
 ```mermaid
 graph LR
-    KMS["KMS Key\n(auto-rotate)"] -->|encrypts| SM["Secrets Manager\n\nDAILY_API_KEY\nDEEPGRAM_API_KEY\nCARTESIA_API_KEY"]
+    KMS["KMS Key\n(auto-rotate)"] -->|encrypts| SM["Secrets Manager\n\nDAILY_API_KEY\nDEEPGRAM_API_KEY\nELEVENLABS_API_KEY"]
 ```
 
 **Resources Created**:
@@ -257,7 +257,7 @@ graph LR
 {
   "DAILY_API_KEY": "your-daily-api-key",
   "DEEPGRAM_API_KEY": "your-deepgram-api-key",
-  "CARTESIA_API_KEY": "your-cartesia-api-key"
+  "ELEVENLABS_API_KEY": "your-elevenlabs-api-key"
 }
 ```
 
@@ -1145,8 +1145,8 @@ The NLB health check targets `/ready`, so at-capacity containers stop receiving 
 | `SERVICE_PORT` | No | 8080 | HTTP server port |
 | `LOG_LEVEL` | No | INFO | Logging level |
 | `STT_PROVIDER` | No | deepgram | Speech-to-text provider |
-| `TTS_PROVIDER` | No | cartesia | Text-to-speech provider |
-| `VOICE_ID` | No | (default) | Cartesia voice UUID |
+| `TTS_PROVIDER` | No | elevenlabs | Text-to-speech provider |
+| `VOICE_ID` | No | (default) | ElevenLabs voice ID |
 
 #### Lambda Function
 
@@ -1196,7 +1196,7 @@ All cross-stack communication uses SSM Parameters:
 {
   "DAILY_API_KEY": "your-daily-api-key",
   "DEEPGRAM_API_KEY": "your-deepgram-api-key",
-  "CARTESIA_API_KEY": "your-cartesia-api-key"
+  "ELEVENLABS_API_KEY": "your-elevenlabs-api-key"
 }
 ```
 
@@ -1229,7 +1229,7 @@ Why inference profile?
 2. **API Keys**:
    - Daily.co API key (with PSTN enabled)
    - Deepgram API key (if using cloud STT provider)
-   - Cartesia API key (if using cloud TTS provider)
+   - ElevenLabs API key (if using cloud TTS provider)
 
 3. **Local Tools**:
    - Node.js 18+
@@ -1271,7 +1271,7 @@ aws secretsmanager put-secret-value \
   --secret-string '{
     "DAILY_API_KEY": "your-actual-daily-key",
     "DEEPGRAM_API_KEY": "your-actual-deepgram-key",
-    "CARTESIA_API_KEY": "your-actual-cartesia-key"
+    "ELEVENLABS_API_KEY": "your-actual-elevenlabs-key"
   }'
 
 # Force ECS to reload secrets
@@ -1397,7 +1397,7 @@ aws logs tail /aws/lambda/VoiceAgentBotRunner... --since 30m
 **Common causes**:
 - Bedrock model not enabled in region
 - SageMaker TTS endpoint not ready or not found
-- Invalid Cartesia API key (if using cloud TTS provider)
+- Invalid ElevenLabs API key (if using cloud TTS provider)
 
 #### 4. Transcription Issues
 

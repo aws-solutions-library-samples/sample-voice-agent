@@ -6,7 +6,7 @@ testing on localhost. No Daily account, phone number, or SIP infrastructure
 needed -- just a browser microphone.
 
 Prerequisites:
-    - Cloud resources must be deployed (Bedrock access, Deepgram/Cartesia keys)
+    - Cloud resources must be deployed (Bedrock access, Deepgram/ElevenLabs keys)
     - pip install pipecat-ai[webrtc,runner]
 
 Architecture:
@@ -62,7 +62,7 @@ class LocalPipelineConfig:
     voice_id: str
     aws_region: str
     stt_provider: str = "deepgram"
-    tts_provider: str = "cartesia"
+    tts_provider: str = "elevenlabs"
     stt_endpoint: str = ""
     tts_endpoint: str = ""
 

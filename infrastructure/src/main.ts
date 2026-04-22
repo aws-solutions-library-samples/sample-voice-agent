@@ -41,7 +41,7 @@ const env: cdk.Environment = {
  *    └── Writes stub SSM params for STT/TTS endpoint names
  *    └── Downstream stacks read these params but the values are
  *        placeholders; the Pipecat runtime uses cloud APIs
- *        (Deepgram STT + Cartesia TTS) configured via Secrets
+ *        (Deepgram STT + ElevenLabs TTS) configured via Secrets
  *        Manager, not the stub values.
  *    └── This fork removed the real SageMakerStack (self-hosted
  *        model endpoints). If you ever need self-hosted mode,

@@ -10,7 +10,7 @@ Architecture:
 - Silero VAD detects speech boundaries
 - Deepgram STT converts speech to text
 - Claude on Bedrock generates responses (with tool calling support)
-- Cartesia TTS converts text to speech
+- ElevenLabs TTS converts text to speech
 """
 
 import os
@@ -171,7 +171,7 @@ class PipelineConfig:
     aws_region: str
     dialin_settings: DialinSettings | None = None
     stt_provider: str = "deepgram"
-    tts_provider: str = "cartesia"
+    tts_provider: str = "elevenlabs"
     stt_endpoint: str = ""
     tts_endpoint: str = ""
 
@@ -188,7 +188,7 @@ async def create_voice_pipeline(
     2. Silero VAD for speech detection
     3. Deepgram STT for transcription
     4. Bedrock Claude for LLM responses
-    5. Cartesia TTS for speech synthesis
+    5. ElevenLabs TTS for speech synthesis
 
     Args:
         config: Pipeline configuration
@@ -790,3 +790,131 @@ def _register_tools(
     )
 
     return function_schemas
+
+
+def _register_capabilities(
+    llm: AWSBedrockLLMService,
+    session_id: str,
+    transport: DailyTransport,
+    collector: Optional["MetricsCollector"] = None,
+    sip_session_tracker: Optional[Dict[str, Optional[str]]] = None,
+    a2a_registry: Optional[Any] = None,
+    available_capabilities: Optional[Any] = None,
+    queue_frame: Optional[Any] = None,
+) -> List[Any]:
+    """Register both local tools and remote A2A capabilities with the LLM.
+
+    This is the capability-registry-aware replacement for _register_tools().
+    It registers the same local tools as _register_tools(), then merges in
+    any remote A2A capabilities discovered by the AgentRegistry.
+
+    The A2A tools use a different handler path (create_a2a_tool_handler)
+    that routes queries to remote agents via the A2A protocol instead of
+    executing them locally via ToolExecutor.
+
+    Args:
+        llm: The Bedrock LLM service to register tools with
+        session_id: Session ID for tool context
+        transport: DailyTransport instance for SIP operations
+        collector: Optional metrics collector
+        sip_session_tracker: Mutable dict to track SIP session ID
+        a2a_registry: AgentRegistry instance with discovered capabilities
+        available_capabilities: Frozenset of detected PipelineCapability values
+        queue_frame: Optional async callback to queue frames into the pipeline
+
+    Returns:
+        List of FunctionSchema objects (local + remote combined) for ToolsSchema
+    """
+    # Start with local tools (capability-filtered) -- returns FunctionSchema list
+    local_tools = _register_tools(
+        llm,
+        session_id,
+        transport,
+        collector,
+        sip_session_tracker,
+        available_capabilities,
+        queue_frame=queue_frame,
+    )
+
+    if not a2a_registry:
+        logger.info("capability_registry_no_registry", reason="registry not provided")
+        return local_tools
+
+    # Get remote A2A tool definitions (still in Bedrock dict format from registry)
+    remote_tool_specs = a2a_registry.get_tool_definitions()
+
+    if not remote_tool_specs:
+        logger.info("capability_registry_no_remote_tools")
+        return local_tools
+
+    # Build set of local tool names for conflict detection
+    # local_tools are FunctionSchema objects with a .name property
+    local_tool_names = {schema.name for schema in local_tools}
+
+    # Register A2A tool handlers and collect non-conflicting specs
+    from app.a2a import create_a2a_tool_handler
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    a2a_tools_added = []
+    a2a_function_schemas = []
+    for skill_info in a2a_registry.get_all_skills():
+        # Skip A2A skills that conflict with local tool names
+        if skill_info.skill_id in local_tool_names:
+            logger.warning(
+                "capability_registry_skill_shadowed_by_local",
+                skill_id=skill_info.skill_id,
+                agent=skill_info.agent_name,
+                reason="local tool takes precedence",
+            )
+            continue
+
+        entry = a2a_registry.get_agent_for_skill(skill_info.skill_id)
+        if not entry:
+            continue
+
+        handler = create_a2a_tool_handler(
+            skill_id=skill_info.skill_id,
+            agent=entry.agent,
+            timeout_seconds=float(a2a_registry.a2a_timeout),
+            collector=collector,
+        )
+
+        llm.register_function(
+            function_name=skill_info.skill_id,
+            handler=handler,
+        )
+
+        a2a_tools_added.append(skill_info.skill_id)
+        logger.info(
+            "a2a_tool_registered_with_llm",
+            skill_id=skill_info.skill_id,
+            agent=skill_info.agent_name,
+        )
+
+    # Convert non-conflicting A2A remote specs from Bedrock format to FunctionSchema
+    for spec in remote_tool_specs:
+        tool_spec = spec.get("toolSpec", {})
+        tool_name = tool_spec.get("name", "")
+        if tool_name in a2a_tools_added:
+            input_schema = tool_spec.get("inputSchema", {}).get("json", {})
+            a2a_function_schemas.append(
+                FunctionSchema(
+                    name=tool_name,
+                    description=tool_spec.get("description", ""),
+                    properties=input_schema.get("properties", {}),
+                    required=input_schema.get("required", []),
+                )
+            )
+
+    # Merge local + remote FunctionSchema lists
+    combined_tools = list(local_tools) + a2a_function_schemas
+
+    logger.info(
+        "capability_registration_complete",
+        local_tools=len(local_tools),
+        a2a_tools=len(a2a_tools_added),
+        total_tools=len(combined_tools),
+        a2a_skill_ids=a2a_tools_added,
+    )
+
+    return combined_tools

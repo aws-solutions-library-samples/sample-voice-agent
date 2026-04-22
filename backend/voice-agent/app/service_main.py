@@ -110,7 +110,7 @@ def categorize_error(error: Exception) -> str:
     # Check for TTS-related errors
     if any(
         kw in error_str or kw in error_type
-        for kw in ["cartesia", "tts", "text-to-speech", "synthesis", "sagemaker_tts"]
+        for kw in ["elevenlabs", "tts", "text-to-speech", "synthesis", "sagemaker_tts"]
     ):
         return ErrorCategory.TTS
 

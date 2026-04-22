@@ -58,7 +58,7 @@ Run all checks and collect results before presenting them:
    import json, sys
    try:
      secret = json.loads(sys.stdin.read())
-     for key in ['DAILY_API_KEY', 'DEEPGRAM_API_KEY', 'CARTESIA_API_KEY']:
+     for key in ['DAILY_API_KEY', 'DEEPGRAM_API_KEY', 'ELEVENLABS_API_KEY']:
        val = secret.get(key, '')
        if not val or 'PLACEHOLDER' in val:
          print(f'MISSING|{key}')
@@ -109,12 +109,12 @@ Infrastructure:
 
 Deployment Mode: Cloud API
   ℹ️  STT: Deepgram cloud API
-  ℹ️  TTS: Cartesia cloud API
+  ℹ️  TTS: ElevenLabs cloud API
 
 Secrets:
   ✅ DAILY_API_KEY — configured (42 chars)
   ✅ DEEPGRAM_API_KEY — configured (40 chars)
-  ✅ CARTESIA_API_KEY — configured (38 chars)
+  ✅ ELEVENLABS_API_KEY — configured (38 chars)
 
 Webhook:
   ✅ Endpoint responding — HTTP 200

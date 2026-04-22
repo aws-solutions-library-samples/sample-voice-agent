@@ -2,7 +2,7 @@
 
 Complete guide for deploying the SIP Voice Agent. Choose your deployment mode:
 
-- **[Cloud API Mode](#path-a-cloud-api-mode)** -- Uses Deepgram and Cartesia cloud APIs. Simpler setup, no GPU quotas or Marketplace subscriptions needed. Best for getting started and development.
+- **[Cloud API Mode](#path-a-cloud-api-mode)** -- Uses Deepgram and ElevenLabs cloud APIs. Simpler setup, no GPU quotas or Marketplace subscriptions needed. Best for getting started and development.
 - **[SageMaker Mode](#path-b-sagemaker-mode)** -- Runs Deepgram STT/TTS on self-hosted SageMaker GPU endpoints. Audio stays in your VPC. Best for production workloads with data residency requirements.
 
 Both modes use the same core infrastructure (VPC, ECS, Lambda, API Gateway) and differ only in how STT/TTS is handled.
@@ -42,13 +42,13 @@ Enable Claude models in your AWS account:
 
 ## Path A: Cloud API Mode
 
-This mode uses Deepgram and Cartesia cloud APIs for STT/TTS. No SageMaker endpoints, no GPU quotas, no Marketplace subscriptions.
+This mode uses Deepgram and ElevenLabs cloud APIs for STT/TTS. No SageMaker endpoints, no GPU quotas, no Marketplace subscriptions.
 
 ### Additional Prerequisites (Cloud API Mode)
 
 You will need API keys for:
 - **[Deepgram](https://console.deepgram.com/)** -- Speech-to-Text (Nova-3 model)
-- **[Cartesia](https://play.cartesia.ai/)** -- Text-to-Speech (Sonic model)
+- **[ElevenLabs](https://elevenlabs.io/app/voice-library)** -- Text-to-Speech (Sonic model)
 
 ### Step 1: Configure Environment
 
@@ -88,7 +88,7 @@ Add your API keys to Secrets Manager **before deploying ECS**, so the container 
 # Create backend/voice-agent/.env with your keys:
 cat > ../backend/voice-agent/.env << 'EOF'
 DEEPGRAM_API_KEY=your-deepgram-api-key
-CARTESIA_API_KEY=your-cartesia-api-key
+ELEVENLABS_API_KEY=your-elevenlabs-api-key
 DAILY_API_KEY=your-daily-api-key
 EOF
 
@@ -228,7 +228,7 @@ EOF
 ./scripts/init-secrets.sh
 ```
 
-In SageMaker mode, you only need the `DAILY_API_KEY`. Deepgram and Cartesia keys are not needed because STT/TTS runs on SageMaker endpoints within your VPC.
+In SageMaker mode, you only need the `DAILY_API_KEY`. Deepgram and ElevenLabs keys are not needed because STT/TTS runs on SageMaker endpoints within your VPC.
 
 ### Step 4: Deploy Remaining Stacks
 
@@ -446,7 +446,7 @@ cd infrastructure
 | Bedrock Claude Haiku | Yes (pay-per-use) | Yes (pay-per-use) |
 | Daily.co | Yes (third-party) | Yes (third-party) |
 | Deepgram Cloud STT | Yes (third-party) | No (self-hosted) |
-| Cartesia Cloud TTS | Yes (third-party) | No (self-hosted) |
+| ElevenLabs Cloud TTS | Yes (third-party) | No (self-hosted) |
 
 **Cloud API mode** does not deploy SageMaker endpoints but routes audio through the public internet. **SageMaker mode** keeps all audio within your VPC.
 

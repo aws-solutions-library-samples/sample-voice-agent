@@ -27,7 +27,7 @@ What stays from upstream and still works end-to-end:
 - **ECS Fargate task** running Pipecat with task scale-in protection,
   graceful drain, session tracker, and CloudWatch observability.
 - **Daily.co WebRTC transport** for phone + browser inputs.
-- **Bedrock Claude LLM**, **Deepgram STT**, **Cartesia TTS** (cloud
+- **Bedrock Claude LLM**, **Deepgram STT**, **ElevenLabs TTS** (cloud
   APIs only — this fork does not deploy self-hosted model endpoints).
 - **Other Claude Code skills**: `deploy-cloud-api`, `configure-daily`,
   `verify-deployment`, `destroy-project`, `create-local-tool`.
@@ -164,7 +164,7 @@ The following table provides a sample cost breakdown for deploying this Guidance
 | Amazon SageMaker STT Endpoint | ml.g6.2xlarge, always-on | ~$350/month |
 | Amazon SageMaker TTS Endpoint | ml.g6.12xlarge, always-on | ~$450/month |
 
-> Third-party service costs (Daily.co, Deepgram, Cartesia) vary by usage and are not included above. Refer to each provider's pricing page.
+> Third-party service costs (Daily.co, Deepgram, ElevenLabs) vary by usage and are not included above. Refer to each provider's pricing page.
 
 ## Prerequisites
 
@@ -195,7 +195,7 @@ The following third-party service accounts and API keys are required:
 | ------- | ------- | ------- |
 | [Daily.co](https://dashboard.daily.co/) | WebRTC/SIP transport for voice calls | [Dashboard](https://dashboard.daily.co/) |
 | STT provider (e.g. [Deepgram](https://console.deepgram.com/)) | Speech-to-text (cloud API mode) | Provider console |
-| TTS provider (e.g. [Cartesia](https://play.cartesia.ai/)) | Text-to-speech (cloud API mode) | Provider console |
+| TTS provider (e.g. [ElevenLabs](https://elevenlabs.io/app/voice-library)) | Text-to-speech (cloud API mode) | Provider console |
 
 ### AWS Account Requirements
 
@@ -260,7 +260,7 @@ This project includes [Claude Code skills](https://docs.anthropic.com/en/docs/cl
 
 | Skill | What It Does |
 | ----- | ------------ |
-| `/deploy-cloud-api` | Full deployment using Deepgram + Cartesia cloud APIs |
+| `/deploy-cloud-api` | Full deployment using Deepgram + ElevenLabs cloud APIs |
 | `/deploy-sagemaker` | Full deployment with self-hosted STT/TTS on Amazon SageMaker GPUs |
 | `/configure-daily` | Set up a phone number and configure PSTN dial-in |
 | `/verify-deployment` | Health check all infrastructure components |
@@ -341,13 +341,13 @@ Once deployed, call your PSTN phone number to interact with the voice agent.
 
 Test the full voice pipeline from your browser without any Daily.co account, phone number, or SIP infrastructure. Uses Pipecat's `SmallWebRTCTransport` with a prebuilt WebRTC browser UI.
 
-**Prerequisites:** Cloud resources must be deployed first (Amazon Bedrock access, Deepgram/Cartesia API keys). Only the transport layer is local -- STT, LLM, and TTS still use cloud services.
+**Prerequisites:** Cloud resources must be deployed first (Amazon Bedrock access, Deepgram/ElevenLabs API keys). Only the transport layer is local -- STT, LLM, and TTS still use cloud services.
 
 ```bash
 cd backend/voice-agent
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env: set DEEPGRAM_API_KEY, CARTESIA_API_KEY, AWS_REGION
+# Edit .env: set DEEPGRAM_API_KEY, ELEVENLABS_API_KEY, AWS_REGION
 
 python -m app.local_main
 # Open http://localhost:7860 in your browser and click Connect
@@ -457,10 +457,10 @@ Run `/destroy-project` in Claude Code. This will:
 
 | Mode | STT/TTS | Best For |
 | ---- | ------- | -------- |
-| **Cloud API** (`USE_CLOUD_APIS=true`) | Deepgram + Cartesia cloud APIs | Getting started, development |
+| **Cloud API** (`USE_CLOUD_APIS=true`) | Deepgram + ElevenLabs cloud APIs | Getting started, development |
 | **Amazon SageMaker** (default) | Self-hosted on GPU instances | Production, data residency |
 
-Cloud API mode requires Deepgram and Cartesia API keys. Amazon SageMaker mode requires [Deepgram Marketplace subscriptions](docs/reference/deepgram-marketplace-setup.md) and GPU quota.
+Cloud API mode requires Deepgram and ElevenLabs API keys. Amazon SageMaker mode requires [Deepgram Marketplace subscriptions](docs/reference/deepgram-marketplace-setup.md) and GPU quota.
 
 ### Known Issues
 
@@ -486,7 +486,7 @@ Cloud API mode requires Deepgram and Cartesia API keys. Amazon SageMaker mode re
 
 - This Guidance creates a NAT Gateway which incurs hourly charges even when idle.
 - Amazon SageMaker endpoints (Amazon SageMaker mode) run on GPU instances that are billed per hour irrespective of usage.
-- Third-party services (Daily.co, Deepgram, Cartesia) have their own pricing and usage limits.
+- Third-party services (Daily.co, Deepgram, ElevenLabs) have their own pricing and usage limits.
 - The Amazon ECS Fargate service runs at least one task continuously (always-on architecture) to avoid cold start latency.
 - Cloud API mode routes audio through the public internet. Use Amazon SageMaker mode if data residency is required.
 

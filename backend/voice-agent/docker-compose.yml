@@ -18,13 +18,13 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
 
       # Provider Selection (default: sagemaker)
-      # Options: "deepgram" for STT, "cartesia" for TTS
+      # Options: "deepgram" for STT, "elevenlabs" for TTS
       - STT_PROVIDER=${STT_PROVIDER:-sagemaker}
       - TTS_PROVIDER=${TTS_PROVIDER:-sagemaker}
 
       # Cloud API Keys (required when using cloud providers)
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
-      - CARTESIA_API_KEY=${CARTESIA_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
 
       # SageMaker Endpoints (required when using sagemaker provider)
       - STT_ENDPOINT_NAME=${STT_ENDPOINT_NAME:-}

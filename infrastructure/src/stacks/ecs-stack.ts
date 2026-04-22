@@ -41,7 +41,7 @@ export interface EcsStackProps extends cdk.StackProps {
  * - Containers run HTTP server that accepts call configurations
  * - NLB routes incoming call requests to available containers
  * - Tasks connect to Daily rooms via WebRTC
- * - Tasks use Bedrock for LLM, Cartesia/Deepgram for TTS/STT
+ * - Tasks use Bedrock for LLM, ElevenLabs/Deepgram for TTS/STT
  */
 export class EcsStack extends cdk.Stack {
   /** ECS cluster for voice agent tasks */
@@ -122,7 +122,7 @@ export class EcsStack extends cdk.Stack {
     // =====================
     // ECS tasks need:
     // - Inbound: Port 8080 from NLB for call requests
-    // - Outbound: Daily WebRTC, Bedrock, Cartesia, Deepgram APIs
+    // - Outbound: Daily WebRTC, Bedrock, ElevenLabs, Deepgram APIs
     this.taskSecurityGroup = new ec2.SecurityGroup(this, 'TaskSecurityGroup', {
       vpc,
       description: `Security group for Voice Agent ECS Service - ${resourcePrefix}`,
@@ -428,7 +428,7 @@ export class EcsStack extends cdk.Stack {
         ...(transferDestination ? { TRANSFER_DESTINATION: transferDestination } : {}),
         // STT/TTS provider: use cloud APIs when SageMaker endpoints are stubs
         STT_PROVIDER: sttEndpointName.includes('cloud-api-mode') ? 'deepgram' : 'sagemaker',
-        TTS_PROVIDER: ttsEndpointName.includes('cloud-api-mode') ? 'cartesia' : 'sagemaker',
+        TTS_PROVIDER: ttsEndpointName.includes('cloud-api-mode') ? 'elevenlabs' : 'sagemaker',
         STT_ENDPOINT_NAME: sttEndpointName,
         TTS_ENDPOINT_NAME: ttsEndpointName,
         // A2A capability discovery namespace

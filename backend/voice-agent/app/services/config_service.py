@@ -32,8 +32,8 @@ class ProviderConfig:
     """Provider configuration for STT/TTS."""
 
     stt_provider: str = "deepgram"
-    tts_provider: str = "cartesia"
-    voice_id: str = "79a125e8-cd45-4c13-8a67-188112f4dd22"
+    tts_provider: str = "elevenlabs"
+    voice_id: str = "vW1NxlzqX8WROgpQAghR"
 
 
 @dataclass
@@ -276,9 +276,9 @@ class ConfigService:
         # Provider config
         provider_config = ProviderConfig(
             stt_provider=params.get(f"{self.CONFIG_PATH}/stt-provider", "deepgram"),
-            tts_provider=params.get(f"{self.CONFIG_PATH}/tts-provider", "cartesia"),
+            tts_provider=params.get(f"{self.CONFIG_PATH}/tts-provider", "elevenlabs"),
             voice_id=params.get(
-                f"{self.CONFIG_PATH}/voice-id", "79a125e8-cd45-4c13-8a67-188112f4dd22"
+                f"{self.CONFIG_PATH}/voice-id", "vW1NxlzqX8WROgpQAghR"
             ),
         )
 
