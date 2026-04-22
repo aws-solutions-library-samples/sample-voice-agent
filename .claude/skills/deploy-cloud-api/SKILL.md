@@ -1,17 +1,17 @@
 ---
 name: deploy-cloud-api
-description: Deploys the voice agent to AWS using Deepgram and Cartesia cloud APIs. Guides through prerequisites, environment setup, CDK deployment, and secrets configuration. Use when deploying for the first time, setting up a dev environment, or when SageMaker is not needed.
+description: Deploys the voice agent to AWS using Deepgram and ElevenLabs cloud APIs. Guides through prerequisites, environment setup, CDK deployment, and secrets configuration. Use when deploying for the first time, setting up a dev environment, or when SageMaker is not needed.
 ---
 
 # Deploy — Cloud API Mode
 
-You are guiding the user through deploying the voice agent using Deepgram and Cartesia cloud APIs. This is the simpler deployment path — no SageMaker, no GPU quotas, no Marketplace subscriptions.
+You are guiding the user through deploying the voice agent using Deepgram and ElevenLabs cloud APIs. This is the simpler deployment path — no SageMaker, no GPU quotas, no Marketplace subscriptions.
 
 ## When This Skill Activates
 - User wants to deploy the voice agent
 - User asks about getting started
 - User wants the simplest deployment path
-- User mentions cloud APIs, Deepgram cloud, or Cartesia
+- User mentions cloud APIs, Deepgram cloud, or ElevenLabs
 
 ## What To Do
 
@@ -76,7 +76,7 @@ Ask the user for three API keys. Explain what each service does in this project:
 
 1. **Daily.co** — Phone/WebRTC platform that bridges calls to the voice agent. Key from [dashboard.daily.co](https://dashboard.daily.co) -> Developers -> API Keys.
 2. **Deepgram** — Speech-to-text (caller's voice -> text for Claude). Key from [console.deepgram.com](https://console.deepgram.com).
-3. **Cartesia** — Text-to-speech (Claude's responses -> natural voice). Key from [play.cartesia.ai](https://play.cartesia.ai).
+3. **ElevenLabs** — Text-to-speech (Claude's responses -> natural voice). Key from [elevenlabs.io](https://elevenlabs.io), voice ID from [elevenlabs.io/app/voice-library](https://elevenlabs.io/app/voice-library).
 
 Confirm the user has all three keys before proceeding. They should not paste keys into chat — keys go into `.env` files and Secrets Manager.
 

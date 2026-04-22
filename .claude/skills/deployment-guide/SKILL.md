@@ -25,7 +25,7 @@ Caller (Phone)
          Transport → VAD → STT → LLM (Claude) → TTS → Transport                          |
                            |                      |                                       |
                      Deepgram STT            Deepgram TTS                                 |
-                  (SageMaker or Cloud)    (Cartesia or SageMaker)                          |
+                  (SageMaker or Cloud)    (ElevenLabs or SageMaker)                          |
                                                                                           |
                            LLM (Bedrock Claude) + Tools ──────────────────────────────+
                                 |                |
@@ -37,7 +37,7 @@ Caller (Phone)
 
 | Mode | STT/TTS | Pros | Cons |
 |------|---------|------|------|
-| **Cloud API** | Deepgram + Cartesia cloud APIs | Simple, no GPU quotas, no Marketplace | Audio leaves VPC, needs API keys |
+| **Cloud API** | Deepgram + ElevenLabs cloud APIs | Simple, no GPU quotas, no Marketplace | Audio leaves VPC, needs API keys |
 | **SageMaker** | Self-hosted Deepgram on GPU instances | Audio stays in VPC, data residency | GPU quotas, Marketplace subscriptions |
 
 ## Skill Workflow Order

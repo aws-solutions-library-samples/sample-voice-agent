@@ -128,9 +128,7 @@ def get_config_from_env() -> PipelineConfig:
         room_token=room_token,
         session_id=session_id,
         system_prompt=system_prompt,
-        voice_id=os.environ.get(
-            "VOICE_ID", "79a125e8-cd45-4c13-8a67-188112f4dd22"
-        ),  # Cartesia voice
+        voice_id=os.environ.get("VOICE_ID", "vW1NxlzqX8WROgpQAghR"),  # ElevenLabs voice
         aws_region=os.environ.get("AWS_REGION", "us-east-1"),
         dialin_settings=dialin,
     )
@@ -206,7 +204,7 @@ def main() -> None:
         # Check if keys are already in environment (for local testing)
         has_keys = (
             os.environ.get("DEEPGRAM_API_KEY")
-            or os.environ.get("CARTESIA_API_KEY")
+            or os.environ.get("ELEVENLABS_API_KEY")
             or os.environ.get("DAILY_API_KEY")
         )
         if has_keys:

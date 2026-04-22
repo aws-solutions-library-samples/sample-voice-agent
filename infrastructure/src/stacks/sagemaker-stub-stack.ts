@@ -14,7 +14,7 @@ export interface SageMakerStubStackProps extends cdk.StackProps {
 /**
  * Stub SageMaker stack for cloud API mode.
  * Creates SSM parameters with placeholder values so downstream stacks can deploy.
- * Use this when STT_PROVIDER and TTS_PROVIDER are set to cloud APIs (deepgram/cartesia).
+ * Use this when STT_PROVIDER and TTS_PROVIDER are set to cloud APIs (deepgram/elevenlabs).
  */
 export class SageMakerStubStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: SageMakerStubStackProps) {
@@ -42,11 +42,11 @@ export class SageMakerStubStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'TtsEndpointName', {
       value: 'cloud-api-mode-tts-not-deployed',
-      description: 'TTS: Using Cartesia cloud API (not SageMaker)',
+      description: 'TTS: Using ElevenLabs cloud API (not SageMaker)',
     });
 
     new cdk.CfnOutput(this, 'Note', {
-      value: 'Set STT_PROVIDER=deepgram and TTS_PROVIDER=cartesia in Pipecat container',
+      value: 'Set STT_PROVIDER=deepgram and TTS_PROVIDER=elevenlabs in Pipecat container',
       description: 'Cloud API mode configuration note',
     });
   }

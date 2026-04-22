@@ -42,15 +42,15 @@ The pipeline supports multiple providers for STT and TTS, configurable via envir
 
 | Provider | STT_PROVIDER | TTS_PROVIDER | Use Case |
 |----------|--------------|--------------|----------|
-| **Cloud APIs** | `deepgram` | `cartesia` | Local dev, quick setup |
+| **Cloud APIs** | `deepgram` | `elevenlabs` | Local dev, quick setup |
 | **SageMaker** | `sagemaker` | `sagemaker` | Production, self-hosted |
 
 ### Cloud API Mode (Recommended for Development)
 ```bash
 export STT_PROVIDER=deepgram
-export TTS_PROVIDER=cartesia
+export TTS_PROVIDER=elevenlabs
 export DEEPGRAM_API_KEY=your-deepgram-key
-export CARTESIA_API_KEY=your-cartesia-key
+export ELEVENLABS_API_KEY=your-elevenlabs-key
 ```
 
 ### SageMaker Mode (Production)
@@ -97,9 +97,9 @@ docker build -t pipecat-voice-local .
 ```bash
 # Set environment variables for cloud APIs
 export STT_PROVIDER=deepgram
-export TTS_PROVIDER=cartesia
+export TTS_PROVIDER=elevenlabs
 export DEEPGRAM_API_KEY=your-deepgram-key
-export CARTESIA_API_KEY=your-cartesia-key
+export ELEVENLABS_API_KEY=your-elevenlabs-key
 export AWS_REGION=us-east-1
 
 # Run container
@@ -107,7 +107,7 @@ docker run -p 8080:8080 \
   -e STT_PROVIDER \
   -e TTS_PROVIDER \
   -e DEEPGRAM_API_KEY \
-  -e CARTESIA_API_KEY \
+  -e ELEVENLABS_API_KEY \
   -e AWS_REGION \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
@@ -146,7 +146,7 @@ curl http://localhost:8080/ping
 
 Test the full voice pipeline from your browser without any Daily.co account, phone number, or SIP infrastructure. Uses pipecat's `SmallWebRTCTransport` with a prebuilt WebRTC browser UI.
 
-**Prerequisites:** Cloud resources must be deployed first (Bedrock access, Deepgram/Cartesia API keys). Only the transport layer is local -- STT, LLM, and TTS still use cloud services.
+**Prerequisites:** Cloud resources must be deployed first (Bedrock access, Deepgram/ElevenLabs API keys). Only the transport layer is local -- STT, LLM, and TTS still use cloud services.
 
 ```bash
 # 1. Install dependencies (includes WebRTC + browser UI extras)
@@ -154,7 +154,7 @@ pip install -r requirements.txt
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env: set DEEPGRAM_API_KEY, CARTESIA_API_KEY, AWS_REGION
+# Edit .env: set DEEPGRAM_API_KEY, ELEVENLABS_API_KEY, AWS_REGION
 
 # 3. Run the local voice agent
 python -m app.local_main
@@ -260,13 +260,13 @@ Stop an active session.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `STT_PROVIDER` | STT provider: `deepgram` or `sagemaker` | `sagemaker` |
-| `TTS_PROVIDER` | TTS provider: `cartesia` or `sagemaker` | `sagemaker` |
+| `TTS_PROVIDER` | TTS provider: `elevenlabs` or `sagemaker` | `sagemaker` |
 
 #### Cloud API Keys (when using cloud providers)
 | Variable | Description | Required When |
 |----------|-------------|---------------|
 | `DEEPGRAM_API_KEY` | Deepgram API key | `STT_PROVIDER=deepgram` |
-| `CARTESIA_API_KEY` | Cartesia API key | `TTS_PROVIDER=cartesia` |
+| `ELEVENLABS_API_KEY` | ElevenLabs API key | `TTS_PROVIDER=elevenlabs` |
 
 #### SageMaker Endpoints (when using sagemaker provider)
 | Variable | Description | Required When |

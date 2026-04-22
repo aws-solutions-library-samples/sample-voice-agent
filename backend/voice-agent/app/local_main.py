@@ -5,7 +5,7 @@ allowing developers to test the full voice pipeline (STT -> LLM -> TTS)
 from a browser on localhost without any SIP/PSTN infrastructure.
 
 Prerequisites:
-    - Cloud resources deployed (Bedrock access, Deepgram/Cartesia API keys)
+    - Cloud resources deployed (Bedrock access, Deepgram/ElevenLabs API keys)
     - pip install pipecat-ai[webrtc,runner]
 
 Usage:
@@ -18,12 +18,12 @@ Usage:
 Environment variables:
     LOCAL_PORT: Port for the FastAPI server (default: 7860)
     SYSTEM_PROMPT: Custom system prompt (optional)
-    VOICE_ID: Cartesia voice ID (optional)
+    VOICE_ID: ElevenLabs voice ID (optional)
     AWS_REGION: AWS region for Bedrock (default: us-east-1)
     STT_PROVIDER: STT provider (default: deepgram)
-    TTS_PROVIDER: TTS provider (default: cartesia)
+    TTS_PROVIDER: TTS provider (default: elevenlabs)
     DEEPGRAM_API_KEY: Deepgram API key (required for cloud STT)
-    CARTESIA_API_KEY: Cartesia API key (required for cloud TTS)
+    ELEVENLABS_API_KEY: ElevenLabs API key (required for cloud TTS)
     ENABLE_TOOL_CALLING: Enable tool calling (default: false)
     ENABLE_FILLER_PHRASES: Enable filler phrases (default: true)
 """
@@ -141,12 +141,10 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
                 "SYSTEM_PROMPT",
                 "You are a helpful AI assistant. Respond concisely and naturally.",
             ),
-            voice_id=os.environ.get(
-                "VOICE_ID", "79a125e8-cd45-4c13-8a67-188112f4dd22"
-            ),
+            voice_id=os.environ.get("VOICE_ID", "vW1NxlzqX8WROgpQAghR"),
             aws_region=os.environ.get("AWS_REGION", "us-east-1"),
             stt_provider=os.environ.get("STT_PROVIDER", "deepgram"),
-            tts_provider=os.environ.get("TTS_PROVIDER", "cartesia"),
+            tts_provider=os.environ.get("TTS_PROVIDER", "elevenlabs"),
             stt_endpoint=os.environ.get("STT_ENDPOINT_NAME", ""),
             tts_endpoint=os.environ.get("TTS_ENDPOINT_NAME", ""),
         )

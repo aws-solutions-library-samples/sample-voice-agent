@@ -87,7 +87,7 @@ class EcsClient:
             room_token: Daily meeting token for bot authentication
             caller_id: Phone number or identifier of the caller
             system_prompt: Custom system prompt for Claude
-            voice_id: Cartesia voice ID for TTS
+            voice_id: TTS voice ID (ElevenLabs voice ID for cloud TTS)
             dialin_settings: Dict with call_id, call_domain, sip_uri for pinless dial-in
 
         Returns:

@@ -4,7 +4,7 @@
 #
 # Supports:
 #   - DEEPGRAM_API_KEY: For STT (Speech-to-Text)
-#   - CARTESIA_API_KEY: For TTS (Text-to-Speech)
+#   - ELEVENLABS_API_KEY: For TTS (Text-to-Speech)
 #   - DAILY_API_KEY: For Daily.co WebRTC transport
 
 set -e
@@ -72,12 +72,12 @@ if [ -t 0 ]; then
         echo ""
     fi
 
-    # Cartesia API Key (TTS)
-    if [ -n "$CARTESIA_API_KEY" ]; then
-        echo -e "Cartesia API Key: ${GREEN}[loaded from .env]${NC}"
+    # ElevenLabs API Key (TTS)
+    if [ -n "$ELEVENLABS_API_KEY" ]; then
+        echo -e "ElevenLabs API Key: ${GREEN}[loaded from .env]${NC}"
     else
-        echo -n "Cartesia API Key: "
-        read -s CARTESIA_API_KEY
+        echo -n "ElevenLabs API Key: "
+        read -s ELEVENLABS_API_KEY
         echo ""
     fi
 
@@ -93,8 +93,8 @@ if [ -t 0 ]; then
 fi
 
 # Validate required keys
-if [ -z "$DEEPGRAM_API_KEY" ] && [ -z "$CARTESIA_API_KEY" ]; then
-    echo -e "${RED}Error: At least DEEPGRAM_API_KEY or CARTESIA_API_KEY must be set${NC}"
+if [ -z "$DEEPGRAM_API_KEY" ] && [ -z "$ELEVENLABS_API_KEY" ]; then
+    echo -e "${RED}Error: At least DEEPGRAM_API_KEY or ELEVENLABS_API_KEY must be set${NC}"
     echo "Set them in backend/voice-agent/.env or as environment variables"
     exit 1
 fi
@@ -103,7 +103,7 @@ fi
 SECRET_VALUE=$(cat <<EOF
 {
   "DEEPGRAM_API_KEY": "${DEEPGRAM_API_KEY:-}",
-  "CARTESIA_API_KEY": "${CARTESIA_API_KEY:-}",
+  "ELEVENLABS_API_KEY": "${ELEVENLABS_API_KEY:-}",
   "DAILY_API_KEY": "${DAILY_API_KEY:-}"
 }
 EOF
@@ -120,9 +120,9 @@ if aws secretsmanager put-secret-value \
     echo -e "${GREEN}✓ Secrets updated successfully${NC}"
     echo ""
     echo "Configured secrets:"
-    echo "  - DEEPGRAM_API_KEY (STT): $([ -n "$DEEPGRAM_API_KEY" ] && echo "✓ Set" || echo "- Not set")"
-    echo "  - CARTESIA_API_KEY (TTS): $([ -n "$CARTESIA_API_KEY" ] && echo "✓ Set" || echo "- Not set")"
-    echo "  - DAILY_API_KEY (WebRTC): $([ -n "$DAILY_API_KEY" ] && echo "✓ Set" || echo "- Not set (optional)")"
+    echo "  - DEEPGRAM_API_KEY (STT):   $([ -n "$DEEPGRAM_API_KEY" ] && echo "✓ Set" || echo "- Not set")"
+    echo "  - ELEVENLABS_API_KEY (TTS): $([ -n "$ELEVENLABS_API_KEY" ] && echo "✓ Set" || echo "- Not set")"
+    echo "  - DAILY_API_KEY (WebRTC):   $([ -n "$DAILY_API_KEY" ] && echo "✓ Set" || echo "- Not set (optional)")"
 else
     echo -e "${RED}✗ Failed to update secrets${NC}"
     echo "Check your AWS credentials and permissions"

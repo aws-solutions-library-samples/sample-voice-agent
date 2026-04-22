@@ -24,7 +24,7 @@ def load_secrets_from_aws() -> bool:
     {
         "DAILY_API_KEY": "...",
         "DEEPGRAM_API_KEY": "...",
-        "CARTESIA_API_KEY": "..."
+        "ELEVENLABS_API_KEY": "..."
     }
 
     Returns:
@@ -47,7 +47,7 @@ def load_secrets_from_aws() -> bool:
 
         # Set API keys as environment variables
         keys_loaded = []
-        for key in ["DAILY_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY"]:
+        for key in ["DAILY_API_KEY", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY"]:
             if key in secrets and secrets[key]:
                 os.environ[key] = secrets[key]
                 keys_loaded.append(key)
