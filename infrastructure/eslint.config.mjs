@@ -31,6 +31,7 @@ export default [
         // Jest globals
         describe: 'readonly',
         it: 'readonly',
+        test: 'readonly',
         expect: 'readonly',
         beforeAll: 'readonly',
         beforeEach: 'readonly',

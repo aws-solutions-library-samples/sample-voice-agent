@@ -95,9 +95,7 @@ export function loadConfig(app: App): VoiceAgentConfig {
   );
 
   const projectName =
-    app.node.tryGetContext(`${prefix}:projectName`) ||
-    process.env.PROJECT_NAME ||
-    'voice-agent';
+    app.node.tryGetContext(`${prefix}:projectName`) || process.env.PROJECT_NAME || 'voice-agent';
 
   const vpcCidr = validateCidr(
     app.node.tryGetContext(`${prefix}:vpcCidr`) || process.env.VPC_CIDR || '10.0.0.0/16'
@@ -124,12 +122,16 @@ export function loadConfig(app: App): VoiceAgentConfig {
   );
 
   const targetSessionsPerTask = parseInt(
-    app.node.tryGetContext(`${prefix}:targetSessionsPerTask`) || process.env.TARGET_SESSIONS_PER_TASK || '3',
+    app.node.tryGetContext(`${prefix}:targetSessionsPerTask`) ||
+      process.env.TARGET_SESSIONS_PER_TASK ||
+      '3',
     10
   );
 
   const sessionCapacityPerTask = parseInt(
-    app.node.tryGetContext(`${prefix}:sessionCapacityPerTask`) || process.env.SESSION_CAPACITY_PER_TASK || '10',
+    app.node.tryGetContext(`${prefix}:sessionCapacityPerTask`) ||
+      process.env.SESSION_CAPACITY_PER_TASK ||
+      '10',
     10
   );
 
@@ -146,13 +148,17 @@ export function loadConfig(app: App): VoiceAgentConfig {
     throw new Error(`minCapacity must be between 1 and 100, got ${minCapacity}`);
   }
   if (maxCapacity < minCapacity || maxCapacity > 100) {
-    throw new Error(`maxCapacity must be between minCapacity (${minCapacity}) and 100, got ${maxCapacity}`);
+    throw new Error(
+      `maxCapacity must be between minCapacity (${minCapacity}) and 100, got ${maxCapacity}`
+    );
   }
   if (targetSessionsPerTask < 1 || targetSessionsPerTask > 10) {
     throw new Error(`targetSessionsPerTask must be between 1 and 10, got ${targetSessionsPerTask}`);
   }
   if (sessionCapacityPerTask < 1 || sessionCapacityPerTask > 50) {
-    throw new Error(`sessionCapacityPerTask must be between 1 and 50, got ${sessionCapacityPerTask}`);
+    throw new Error(
+      `sessionCapacityPerTask must be between 1 and 50, got ${sessionCapacityPerTask}`
+    );
   }
   if (sessionCapacityPerTask < targetSessionsPerTask) {
     throw new Error(

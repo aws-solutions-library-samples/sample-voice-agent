@@ -71,9 +71,7 @@ export class SessionCounterLambdaConstruct extends Construct {
       functionName: `${resourcePrefix}-session-counter`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
-      code: lambda.Code.fromAsset(
-        path.join(__dirname, '..', 'functions', 'session-counter')
-      ),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'functions', 'session-counter')),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
       environment: {
@@ -93,15 +91,8 @@ export class SessionCounterLambdaConstruct extends Construct {
       new iam.PolicyStatement({
         sid: 'DynamoDBReadAccess',
         effect: iam.Effect.ALLOW,
-        actions: [
-          'dynamodb:Query',
-          'dynamodb:Scan',
-          'dynamodb:UpdateItem',
-        ],
-        resources: [
-          sessionTable.tableArn,
-          `${sessionTable.tableArn}/index/*`,
-        ],
+        actions: ['dynamodb:Query', 'dynamodb:Scan', 'dynamodb:UpdateItem'],
+        resources: [sessionTable.tableArn, `${sessionTable.tableArn}/index/*`],
       })
     );
 

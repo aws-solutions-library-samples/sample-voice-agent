@@ -95,20 +95,11 @@ export class EcsStack extends cdk.Stack {
     const transferDestination = config.transferDestination;
 
     // SageMaker endpoint names for Deepgram STT/TTS (optional - only needed when using SageMaker providers)
-    const sttEndpointName = ssm.StringParameter.valueFromLookup(
-      this,
-      SSM_PARAMS.STT_ENDPOINT_NAME
-    );
-    const ttsEndpointName = ssm.StringParameter.valueFromLookup(
-      this,
-      SSM_PARAMS.TTS_ENDPOINT_NAME
-    );
+    const sttEndpointName = ssm.StringParameter.valueFromLookup(this, SSM_PARAMS.STT_ENDPOINT_NAME);
+    const ttsEndpointName = ssm.StringParameter.valueFromLookup(this, SSM_PARAMS.TTS_ENDPOINT_NAME);
 
     // SageMaker security group for VPC endpoint access
-    const sagemakerSgId = ssm.StringParameter.valueFromLookup(
-      this,
-      SSM_PARAMS.SAGEMAKER_SG_ID
-    );
+    const sagemakerSgId = ssm.StringParameter.valueFromLookup(this, SSM_PARAMS.SAGEMAKER_SG_ID);
     const vpcEndpointSgId = ssm.StringParameter.valueFromLookup(
       this,
       SSM_PARAMS.VPC_ENDPOINT_SG_ID
@@ -139,7 +130,9 @@ export class EcsStack extends cdk.Stack {
     // Allow ECS tasks to reach SageMaker endpoints via VPC endpoint
     // Required for SageMaker BiDi streaming (Deepgram STT/TTS on SageMaker)
     const sagemakerSg = ec2.SecurityGroup.fromSecurityGroupId(
-      this, 'ImportedSageMakerSG', sagemakerSgId
+      this,
+      'ImportedSageMakerSG',
+      sagemakerSgId
     );
     sagemakerSg.addIngressRule(
       this.taskSecurityGroup,
@@ -154,7 +147,9 @@ export class EcsStack extends cdk.Stack {
 
     // Allow ECS tasks to reach VPC interface endpoints (SageMaker Runtime, etc.)
     const vpcEndpointSg = ec2.SecurityGroup.fromSecurityGroupId(
-      this, 'ImportedVpcEndpointSG', vpcEndpointSgId
+      this,
+      'ImportedVpcEndpointSG',
+      vpcEndpointSgId
     );
     vpcEndpointSg.addIngressRule(
       this.taskSecurityGroup,
@@ -185,14 +180,10 @@ export class EcsStack extends cdk.Stack {
     // HTTP namespace for registering capability agents.
     // Agents register themselves on startup; voice agent discovers them
     // via servicediscovery:DiscoverInstances at runtime.
-    this.capabilityNamespace = new servicediscovery.HttpNamespace(
-      this,
-      'CapabilityNamespace',
-      {
-        name: `${resourcePrefix}-capabilities`,
-        description: `A2A capability agent discovery namespace - ${resourcePrefix}`,
-      }
-    );
+    this.capabilityNamespace = new servicediscovery.HttpNamespace(this, 'CapabilityNamespace', {
+      name: `${resourcePrefix}-capabilities`,
+      description: `A2A capability agent discovery namespace - ${resourcePrefix}`,
+    });
 
     // =====================
     // Docker Image Build
@@ -285,16 +276,8 @@ export class EcsStack extends cdk.Stack {
       new iam.PolicyStatement({
         sid: 'DynamoDBSessionTracking',
         effect: iam.Effect.ALLOW,
-        actions: [
-          'dynamodb:PutItem',
-          'dynamodb:UpdateItem',
-          'dynamodb:GetItem',
-          'dynamodb:Query',
-        ],
-        resources: [
-          sessionTable.tableArn,
-          `${sessionTable.tableArn}/index/*`,
-        ],
+        actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:GetItem', 'dynamodb:Query'],
+        resources: [sessionTable.tableArn, `${sessionTable.tableArn}/index/*`],
       })
     );
 
@@ -308,13 +291,8 @@ export class EcsStack extends cdk.Stack {
       new iam.PolicyStatement({
         sid: 'BedrockKBRetrieve',
         effect: iam.Effect.ALLOW,
-        actions: [
-          'bedrock:Retrieve',
-          'bedrock:RetrieveAndGenerate',
-        ],
-        resources: [
-          `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`,
-        ],
+        actions: ['bedrock:Retrieve', 'bedrock:RetrieveAndGenerate'],
+        resources: [`arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`],
       })
     );
 
@@ -325,9 +303,7 @@ export class EcsStack extends cdk.Stack {
         sid: 'SSMReadConfig',
         effect: iam.Effect.ALLOW,
         actions: ['ssm:GetParameter', 'ssm:GetParameters'],
-        resources: [
-          `arn:aws:ssm:${this.region}:${this.account}:parameter/voice-agent/*`,
-        ],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/voice-agent/*`],
       })
     );
 
@@ -531,7 +507,7 @@ export class EcsStack extends cdk.Stack {
     // disableScaleIn: true -- scale-in is managed by step scaling policy + task protection
 
     // MaxSessionsPerTask: hottest single task — retained for dashboard/alarms.
-    const maxSessionsPerTaskMetric = new cloudwatch.Metric({
+    const _maxSessionsPerTaskMetric = new cloudwatch.Metric({
       namespace: 'VoiceAgent/Sessions',
       metricName: 'MaxSessionsPerTask',
       dimensionsMap: { Environment: config.environment },
@@ -571,12 +547,12 @@ export class EcsStack extends cdk.Stack {
     scalableTarget.scaleOnMetric('ScaleIn', {
       metric: avgSessionsPerTaskMetric,
       scalingSteps: [
-        { upper: 1, change: 0 },     // Between threshold (1.0) and above: no action
-        { upper: 0, change: -3 },    // Below 1.0: remove up to 3 idle tasks
+        { upper: 1, change: 0 }, // Between threshold (1.0) and above: no action
+        { upper: 0, change: -3 }, // Below 1.0: remove up to 3 idle tasks
       ],
       adjustmentType: appscaling.AdjustmentType.CHANGE_IN_CAPACITY,
-      cooldown: cdk.Duration.seconds(30),   // Fast cooldown for testing
-      evaluationPeriods: 2,  // Must be low for 2 consecutive periods before scaling in
+      cooldown: cdk.Duration.seconds(30), // Fast cooldown for testing
+      evaluationPeriods: 2, // Must be low for 2 consecutive periods before scaling in
     });
 
     // =====================

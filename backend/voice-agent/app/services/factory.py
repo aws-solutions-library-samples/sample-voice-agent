@@ -161,12 +161,14 @@ def create_tts_service(config: "PipelineConfig"):
             voice_id=voice_id,
             model=_ELEVENLABS_DEFAULT_MODEL,
         )
+        # NOTE: using flat kwargs (voice_id, model) instead of nested .Settings —
+        # pipecat-ai 0.0.102 (pinned in requirements.txt) does not expose the
+        # Settings inner class; it was added in 0.0.106. Flat kwargs work on
+        # both versions.
         return ElevenLabsTTSService(
             api_key=api_key,
-            settings=ElevenLabsTTSService.Settings(
-                voice=voice_id,
-                model=_ELEVENLABS_DEFAULT_MODEL,
-            ),
+            voice_id=voice_id,
+            model=_ELEVENLABS_DEFAULT_MODEL,
         )
 
 

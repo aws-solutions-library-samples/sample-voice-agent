@@ -5,10 +5,7 @@ export {
   VoiceAgentMonitoringConstruct,
   VoiceAgentMonitoringProps,
 } from './voice-agent-monitoring-construct';
-export {
-  SessionTableConstruct,
-  SessionTableConstructProps,
-} from './session-table-construct';
+export { SessionTableConstruct, SessionTableConstructProps } from './session-table-construct';
 export {
   SessionCounterLambdaConstruct,
   SessionCounterLambdaConstructProps,

@@ -113,9 +113,7 @@ describe('EcsStack Container Environment Variables', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'SERVICE_MODE', Value: 'true' }),
-          ]),
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'SERVICE_MODE', Value: 'true' })]),
         }),
       ]),
     });
@@ -125,9 +123,7 @@ describe('EcsStack Container Environment Variables', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'SERVICE_PORT', Value: '8080' }),
-          ]),
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'SERVICE_PORT', Value: '8080' })]),
         }),
       ]),
     });
@@ -161,9 +157,7 @@ describe('EcsStack Container Environment Variables', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'STT_ENDPOINT_NAME' }),
-          ]),
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'STT_ENDPOINT_NAME' })]),
         }),
       ]),
     });
@@ -173,9 +167,7 @@ describe('EcsStack Container Environment Variables', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'TTS_ENDPOINT_NAME' }),
-          ]),
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'TTS_ENDPOINT_NAME' })]),
         }),
       ]),
     });
@@ -185,9 +177,7 @@ describe('EcsStack Container Environment Variables', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'API_KEY_SECRET_ARN' }),
-          ]),
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'API_KEY_SECRET_ARN' })]),
         }),
       ]),
     });
@@ -197,9 +187,7 @@ describe('EcsStack Container Environment Variables', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'ENVIRONMENT', Value: 'poc' }),
-          ]),
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'ENVIRONMENT', Value: 'poc' })]),
         }),
       ]),
     });
@@ -210,9 +198,7 @@ describe('EcsStack Container Environment Variables', () => {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
           Environment: Match.not(
-            Match.arrayWith([
-              Match.objectLike({ Name: 'KB_KNOWLEDGE_BASE_ID' }),
-            ])
+            Match.arrayWith([Match.objectLike({ Name: 'KB_KNOWLEDGE_BASE_ID' })])
           ),
         }),
       ]),
@@ -268,10 +254,7 @@ describe('EcsStack IAM Permissions', () => {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Action: Match.arrayWith([
-              'bedrock:Retrieve',
-              'bedrock:RetrieveAndGenerate',
-            ]),
+            Action: Match.arrayWith(['bedrock:Retrieve', 'bedrock:RetrieveAndGenerate']),
             Effect: 'Allow',
           }),
         ]),
@@ -284,9 +267,7 @@ describe('EcsStack IAM Permissions', () => {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Action: Match.arrayWith([
-              'sagemaker:InvokeEndpoint',
-            ]),
+            Action: Match.arrayWith(['sagemaker:InvokeEndpoint']),
             Effect: 'Allow',
           }),
         ]),
@@ -301,9 +282,7 @@ describe('EcsStack IAM Permissions', () => {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Action: Match.arrayWith([
-              'sagemaker:InvokeEndpointWithBidirectionalStream',
-            ]),
+            Action: Match.arrayWith(['sagemaker:InvokeEndpointWithBidirectionalStream']),
             Effect: 'Allow',
           }),
         ]),
@@ -316,9 +295,7 @@ describe('EcsStack IAM Permissions', () => {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Action: Match.arrayWith([
-              'sagemaker:InvokeEndpointWithResponseStream',
-            ]),
+            Action: Match.arrayWith(['sagemaker:InvokeEndpointWithResponseStream']),
             Effect: 'Allow',
           }),
         ]),
@@ -477,9 +454,7 @@ describe('EcsStack CloudMap Namespace', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'A2A_NAMESPACE' }),
-          ]),
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'A2A_NAMESPACE' })]),
         }),
       ]),
     });
@@ -517,111 +492,138 @@ describe('Auto-Scaling', () => {
   });
 
   test('creates target tracking scaling policy on SessionsPerTask (fleet avg)', () => {
-    template.hasResourceProperties('AWS::ApplicationAutoScaling::ScalingPolicy', Match.objectLike({
-      PolicyType: 'TargetTrackingScaling',
-      TargetTrackingScalingPolicyConfiguration: Match.objectLike({
-        TargetValue: 3,
-        DisableScaleIn: true,
-        CustomizedMetricSpecification: Match.objectLike({
-          MetricName: 'SessionsPerTask',
-          Namespace: 'VoiceAgent/Sessions',
-          Statistic: 'Average',
+    template.hasResourceProperties(
+      'AWS::ApplicationAutoScaling::ScalingPolicy',
+      Match.objectLike({
+        PolicyType: 'TargetTrackingScaling',
+        TargetTrackingScalingPolicyConfiguration: Match.objectLike({
+          TargetValue: 3,
+          DisableScaleIn: true,
+          CustomizedMetricSpecification: Match.objectLike({
+            MetricName: 'SessionsPerTask',
+            Namespace: 'VoiceAgent/Sessions',
+            Statistic: 'Average',
+          }),
         }),
-      }),
-    }));
+      })
+    );
   });
 
   test('creates step scaling policy for scale-in', () => {
     // The scale-in policy creates a LowerAlarm that triggers removal of idle tasks.
     // Verify at least one step scaling policy has a negative step adjustment.
-    template.hasResourceProperties('AWS::ApplicationAutoScaling::ScalingPolicy', Match.objectLike({
-      PolicyType: 'StepScaling',
-      StepScalingPolicyConfiguration: Match.objectLike({
-        AdjustmentType: 'ChangeInCapacity',
-        Cooldown: 30,
-        StepAdjustments: Match.arrayWith([
-          Match.objectLike({
-            ScalingAdjustment: -3,
-          }),
-        ]),
-      }),
-    }));
+    template.hasResourceProperties(
+      'AWS::ApplicationAutoScaling::ScalingPolicy',
+      Match.objectLike({
+        PolicyType: 'StepScaling',
+        StepScalingPolicyConfiguration: Match.objectLike({
+          AdjustmentType: 'ChangeInCapacity',
+          Cooldown: 30,
+          StepAdjustments: Match.arrayWith([
+            Match.objectLike({
+              ScalingAdjustment: -3,
+            }),
+          ]),
+        }),
+      })
+    );
   });
 
   test('task role has ECS task protection permissions', () => {
-    template.hasResourceProperties('AWS::IAM::Policy', Match.objectLike({
-      PolicyDocument: Match.objectLike({
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: ['ecs:GetTaskProtection', 'ecs:UpdateTaskProtection'],
-            Effect: 'Allow',
-            Resource: '*',
-          }),
-        ]),
-      }),
-    }));
+    template.hasResourceProperties(
+      'AWS::IAM::Policy',
+      Match.objectLike({
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: ['ecs:GetTaskProtection', 'ecs:UpdateTaskProtection'],
+              Effect: 'Allow',
+              Resource: '*',
+            }),
+          ]),
+        }),
+      })
+    );
   });
 });
 
 describe('Container Configuration', () => {
   test('container has stop timeout of 120 seconds', () => {
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', Match.objectLike({
-      ContainerDefinitions: Match.arrayWith([
-        Match.objectLike({
-          StopTimeout: 120,
-        }),
-      ]),
-    }));
+    template.hasResourceProperties(
+      'AWS::ECS::TaskDefinition',
+      Match.objectLike({
+        ContainerDefinitions: Match.arrayWith([
+          Match.objectLike({
+            StopTimeout: 120,
+          }),
+        ]),
+      })
+    );
   });
 
   test('container has MAX_CONCURRENT_CALLS env var', () => {
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', Match.objectLike({
-      ContainerDefinitions: Match.arrayWith([
-        Match.objectLike({
-          Environment: Match.arrayWith([
-            Match.objectLike({
-              Name: 'MAX_CONCURRENT_CALLS',
-              Value: '10',
-            }),
-          ]),
-        }),
-      ]),
-    }));
+    template.hasResourceProperties(
+      'AWS::ECS::TaskDefinition',
+      Match.objectLike({
+        ContainerDefinitions: Match.arrayWith([
+          Match.objectLike({
+            Environment: Match.arrayWith([
+              Match.objectLike({
+                Name: 'MAX_CONCURRENT_CALLS',
+                Value: '10',
+              }),
+            ]),
+          }),
+        ]),
+      })
+    );
   });
 });
 
 describe('NLB Configuration', () => {
   test('target group uses /ready health check path', () => {
-    template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', Match.objectLike({
-      HealthCheckPath: '/ready',
-    }));
+    template.hasResourceProperties(
+      'AWS::ElasticLoadBalancingV2::TargetGroup',
+      Match.objectLike({
+        HealthCheckPath: '/ready',
+      })
+    );
   });
 
   test('target group has 300s deregistration delay', () => {
-    template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', Match.objectLike({
-      TargetGroupAttributes: Match.arrayWith([
-        Match.objectLike({
-          Key: 'deregistration_delay.timeout_seconds',
-          Value: '300',
-        }),
-      ]),
-    }));
+    template.hasResourceProperties(
+      'AWS::ElasticLoadBalancingV2::TargetGroup',
+      Match.objectLike({
+        TargetGroupAttributes: Match.arrayWith([
+          Match.objectLike({
+            Key: 'deregistration_delay.timeout_seconds',
+            Value: '300',
+          }),
+        ]),
+      })
+    );
   });
 });
 
 describe('Service Deployment Configuration', () => {
   test('service uses minCapacity as desired count', () => {
-    template.hasResourceProperties('AWS::ECS::Service', Match.objectLike({
-      DesiredCount: 1,
-    }));
+    template.hasResourceProperties(
+      'AWS::ECS::Service',
+      Match.objectLike({
+        DesiredCount: 1,
+      })
+    );
   });
 
   test('service has deployment configuration for safe rollouts', () => {
-    template.hasResourceProperties('AWS::ECS::Service', Match.objectLike({
-      DeploymentConfiguration: Match.objectLike({
-        MinimumHealthyPercent: 100,
-        MaximumPercent: 200,
-      }),
-    }));
+    template.hasResourceProperties(
+      'AWS::ECS::Service',
+      Match.objectLike({
+        DeploymentConfiguration: Match.objectLike({
+          MinimumHealthyPercent: 100,
+          MaximumPercent: 200,
+        }),
+      })
+    );
   });
 });

@@ -2,13 +2,7 @@
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { loadConfig } from './config';
-import {
-  NetworkStack,
-  StorageStack,
-  SageMakerStubStack,
-  EcsStack,
-  BotRunnerStack,
-} from './stacks';
+import { NetworkStack, StorageStack, SageMakerStubStack, EcsStack, BotRunnerStack } from './stacks';
 
 const app = new cdk.App();
 

@@ -97,12 +97,7 @@ export class VoiceAgentMonitoringConstruct extends Construct {
     }
 
     // Create alarms
-    this.alarms = this.createAlarms(
-      props,
-      resourcePrefix,
-      DEFAULT_THRESHOLDS,
-      alarmAction
-    );
+    this.alarms = this.createAlarms(props, resourcePrefix, DEFAULT_THRESHOLDS, alarmAction);
 
     // Create dashboard
     this.dashboard = this.createDashboard(props, resourcePrefix, DEFAULT_THRESHOLDS);
@@ -114,10 +109,7 @@ export class VoiceAgentMonitoringConstruct extends Construct {
   /**
    * Creates SNS topic for alarm notifications.
    */
-  private createNotificationTopic(
-    resourcePrefix: string,
-    emails: string[]
-  ): sns.Topic {
+  private createNotificationTopic(resourcePrefix: string, emails: string[]): sns.Topic {
     const topic = new sns.Topic(this, 'AlarmNotificationTopic', {
       topicName: `${resourcePrefix}-alarms`,
       displayName: 'Voice Agent Alarm Notifications',
@@ -165,8 +157,7 @@ export class VoiceAgentMonitoringConstruct extends Construct {
       threshold: thresholds.e2eLatencyP95Ms,
       evaluationPeriods: 3,
       datapointsToAlarm: 3,
-      comparisonOperator:
-        cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     alarms.push(e2eLatencyAlarm);
@@ -208,14 +199,12 @@ export class VoiceAgentMonitoringConstruct extends Construct {
 
     const errorRateAlarm = new cloudwatch.Alarm(this, 'ErrorRateAlarm', {
       alarmName: `${resourcePrefix}-error-rate-high`,
-      alarmDescription:
-        'Call error rate exceeds 5% - service degradation detected',
+      alarmDescription: 'Call error rate exceeds 5% - service degradation detected',
       metric: errorRateExpression,
       threshold: thresholds.errorRatePercent,
       evaluationPeriods: 2,
       datapointsToAlarm: 2,
-      comparisonOperator:
-        cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     alarms.push(errorRateAlarm);
@@ -239,8 +228,7 @@ export class VoiceAgentMonitoringConstruct extends Construct {
       threshold: thresholds.cpuUtilizationPercent,
       evaluationPeriods: 3,
       datapointsToAlarm: 2,
-      comparisonOperator:
-        cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     alarms.push(cpuAlarm);
@@ -264,8 +252,7 @@ export class VoiceAgentMonitoringConstruct extends Construct {
       threshold: thresholds.memoryUtilizationPercent,
       evaluationPeriods: 3,
       datapointsToAlarm: 2,
-      comparisonOperator:
-        cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     alarms.push(memoryAlarm);
@@ -299,22 +286,16 @@ export class VoiceAgentMonitoringConstruct extends Construct {
       label: 'Container Restarts',
     });
 
-    const containerRestartAlarm = new cloudwatch.Alarm(
-      this,
-      'ContainerRestartAlarm',
-      {
-        alarmName: `${resourcePrefix}-container-restarts`,
-        alarmDescription:
-          'Container restarting frequently - investigate crash cause',
-        metric: restartExpression,
-        threshold: 1, // Alert on any restart detected
-        evaluationPeriods: 12, // 1 hour window (12 x 5-min periods)
-        datapointsToAlarm: thresholds.containerRestartsPerHour,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      }
-    );
+    const containerRestartAlarm = new cloudwatch.Alarm(this, 'ContainerRestartAlarm', {
+      alarmName: `${resourcePrefix}-container-restarts`,
+      alarmDescription: 'Container restarting frequently - investigate crash cause',
+      metric: restartExpression,
+      threshold: 1, // Alert on any restart detected
+      evaluationPeriods: 12, // 1 hour window (12 x 5-min periods)
+      datapointsToAlarm: thresholds.containerRestartsPerHour,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
     alarms.push(containerRestartAlarm);
 
     // =================================================================
@@ -323,30 +304,24 @@ export class VoiceAgentMonitoringConstruct extends Construct {
     const alarmTargetSessions = props.targetSessionsPerTask ?? 3;
     const alarmSessionCapacity = props.sessionCapacityPerTask ?? 10;
     const sessionsAlarmThreshold = alarmSessionCapacity - 0.5;
-    const sessionsPerTaskAlarm = new cloudwatch.Alarm(
-      this,
-      'SessionsPerTaskHighAlarm',
-      {
-        alarmName: `${resourcePrefix}-sessions-per-task-high`,
-        alarmDescription:
-          `MaxSessionsPerTask exceeds ${sessionsAlarmThreshold} (capacity=${alarmSessionCapacity}, target=${alarmTargetSessions}) -- approaching per-container capacity, verify scaling is responding`,
-        metric: new cloudwatch.Metric({
-          namespace: 'VoiceAgent/Sessions',
-          metricName: 'MaxSessionsPerTask',
-          dimensionsMap: {
-            Environment: props.environment,
-          },
-          statistic: 'Average',
-          period: cdk.Duration.minutes(1),
-        }),
-        threshold: sessionsAlarmThreshold,
-        evaluationPeriods: 2,
-        datapointsToAlarm: 2,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      }
-    );
+    const sessionsPerTaskAlarm = new cloudwatch.Alarm(this, 'SessionsPerTaskHighAlarm', {
+      alarmName: `${resourcePrefix}-sessions-per-task-high`,
+      alarmDescription: `MaxSessionsPerTask exceeds ${sessionsAlarmThreshold} (capacity=${alarmSessionCapacity}, target=${alarmTargetSessions}) -- approaching per-container capacity, verify scaling is responding`,
+      metric: new cloudwatch.Metric({
+        namespace: 'VoiceAgent/Sessions',
+        metricName: 'MaxSessionsPerTask',
+        dimensionsMap: {
+          Environment: props.environment,
+        },
+        statistic: 'Average',
+        period: cdk.Duration.minutes(1),
+      }),
+      threshold: sessionsAlarmThreshold,
+      evaluationPeriods: 2,
+      datapointsToAlarm: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
     alarms.push(sessionsPerTaskAlarm);
 
     // =================================================================
@@ -356,45 +331,30 @@ export class VoiceAgentMonitoringConstruct extends Construct {
     // =================================================================
     const taskLogGroup =
       props.taskLogGroup ??
-      logs.LogGroup.fromLogGroupName(
-        this,
-        'ProtectionFailureLogGroup',
-        `/ecs/${resourcePrefix}`
-      );
-    const protectionFailureFilter = new logs.MetricFilter(
-      this,
-      'ProtectionFailureMetricFilter',
-      {
-        logGroup: taskLogGroup,
-        filterPattern: logs.FilterPattern.literal(
-          '"task_protection_all_retries_exhausted"'
-        ),
-        metricNamespace: 'VoiceAgent/Sessions',
-        metricName: 'TaskProtectionFailures',
-        metricValue: '1',
-        defaultValue: 0,
-      }
-    );
+      logs.LogGroup.fromLogGroupName(this, 'ProtectionFailureLogGroup', `/ecs/${resourcePrefix}`);
+    const protectionFailureFilter = new logs.MetricFilter(this, 'ProtectionFailureMetricFilter', {
+      logGroup: taskLogGroup,
+      filterPattern: logs.FilterPattern.literal('"task_protection_all_retries_exhausted"'),
+      metricNamespace: 'VoiceAgent/Sessions',
+      metricName: 'TaskProtectionFailures',
+      metricValue: '1',
+      defaultValue: 0,
+    });
 
-    const protectionFailureAlarm = new cloudwatch.Alarm(
-      this,
-      'ProtectionFailureAlarm',
-      {
-        alarmName: `${resourcePrefix}-task-protection-failure`,
-        alarmDescription:
-          'Task scale-in protection API failed after all retries -- active calls may be terminated during scale-in',
-        metric: protectionFailureFilter.metric({
-          statistic: 'Sum',
-          period: cdk.Duration.minutes(5),
-        }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        datapointsToAlarm: 1,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      }
-    );
+    const protectionFailureAlarm = new cloudwatch.Alarm(this, 'ProtectionFailureAlarm', {
+      alarmName: `${resourcePrefix}-task-protection-failure`,
+      alarmDescription:
+        'Task scale-in protection API failed after all retries -- active calls may be terminated during scale-in',
+      metric: protectionFailureFilter.metric({
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      datapointsToAlarm: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
     alarms.push(protectionFailureAlarm);
 
     // =================================================================
@@ -402,30 +362,25 @@ export class VoiceAgentMonitoringConstruct extends Construct {
     // Detects when the session counter Lambda stops emitting metrics,
     // which would blind the auto-scaling policies.
     // =================================================================
-    const metricStalenessAlarm = new cloudwatch.Alarm(
-      this,
-      'MetricStalenessAlarm',
-      {
-        alarmName: `${resourcePrefix}-metric-staleness`,
-        alarmDescription:
-          'SessionsPerTask metric missing for >5 minutes -- session counter Lambda may have failed, auto-scaling is blind',
-        metric: new cloudwatch.Metric({
-          namespace: 'VoiceAgent/Sessions',
-          metricName: 'SessionsPerTask',
-          dimensionsMap: {
-            Environment: props.environment,
-          },
-          statistic: 'SampleCount',
-          period: cdk.Duration.minutes(1),
-        }),
-        threshold: 1,
-        evaluationPeriods: 5,
-        datapointsToAlarm: 1, // Need at least 1 datapoint in 5 periods
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-      }
-    );
+    const metricStalenessAlarm = new cloudwatch.Alarm(this, 'MetricStalenessAlarm', {
+      alarmName: `${resourcePrefix}-metric-staleness`,
+      alarmDescription:
+        'SessionsPerTask metric missing for >5 minutes -- session counter Lambda may have failed, auto-scaling is blind',
+      metric: new cloudwatch.Metric({
+        namespace: 'VoiceAgent/Sessions',
+        metricName: 'SessionsPerTask',
+        dimensionsMap: {
+          Environment: props.environment,
+        },
+        statistic: 'SampleCount',
+        period: cdk.Duration.minutes(1),
+      }),
+      threshold: 1,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 1, // Need at least 1 datapoint in 5 periods
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
     alarms.push(metricStalenessAlarm);
 
     // Add alarm actions if notifications enabled
@@ -1444,10 +1399,7 @@ export class VoiceAgentMonitoringConstruct extends Construct {
   /**
    * Creates CloudWatch Logs Insights saved queries for common debugging scenarios.
    */
-  private createSavedQueries(
-    _props: VoiceAgentMonitoringProps,
-    resourcePrefix: string
-  ): void {
+  private createSavedQueries(_props: VoiceAgentMonitoringProps, resourcePrefix: string): void {
     const logGroupName = `/ecs/${resourcePrefix}-voice-agent`;
 
     // Query: Recent calls with errors
@@ -1480,7 +1432,9 @@ export class VoiceAgentMonitoringConstruct extends Construct {
       queryString: new logs.QueryString({
         fields: ['@timestamp', 'call_id', 'tool_name', 'ToolStatus', 'ToolExecutionTime'],
         filterStatements: ['event = "tool_execution"'],
-        statsStatements: ['count() as invocations, avg(ToolExecutionTime) as avg_duration by tool_name, ToolStatus'],
+        statsStatements: [
+          'count() as invocations, avg(ToolExecutionTime) as avg_duration by tool_name, ToolStatus',
+        ],
         sort: 'invocations desc',
       }),
       logGroups: [logs.LogGroup.fromLogGroupName(this, 'LogGroup3', logGroupName)],
@@ -1525,7 +1479,16 @@ export class VoiceAgentMonitoringConstruct extends Construct {
     new logs.QueryDefinition(this, 'CallSummaryQuery', {
       queryDefinitionName: `${resourcePrefix}/call-summary`,
       queryString: new logs.QueryString({
-        fields: ['@timestamp', 'call_id', 'session_id', 'duration_seconds', 'TurnCount', 'completion_status', 'error_category', 'AvgE2ELatency'],
+        fields: [
+          '@timestamp',
+          'call_id',
+          'session_id',
+          'duration_seconds',
+          'TurnCount',
+          'completion_status',
+          'error_category',
+          'AvgE2ELatency',
+        ],
         filterStatements: ['event = "call_summary"'],
         sort: '@timestamp desc',
         limit: 100,
@@ -1537,7 +1500,15 @@ export class VoiceAgentMonitoringConstruct extends Construct {
     new logs.QueryDefinition(this, 'TraceCallQuery', {
       queryDefinitionName: `${resourcePrefix}/trace-call`,
       queryString: new logs.QueryString({
-        fields: ['@timestamp', 'event', 'turn_number', 'speaker', 'content', 'error_category', 'AvgE2ELatency'],
+        fields: [
+          '@timestamp',
+          'event',
+          'turn_number',
+          'speaker',
+          'content',
+          'error_category',
+          'AvgE2ELatency',
+        ],
         filterStatements: ['call_id = "CALL_ID_PLACEHOLDER"'],
         sort: '@timestamp asc',
       }),
@@ -1548,8 +1519,17 @@ export class VoiceAgentMonitoringConstruct extends Construct {
     new logs.QueryDefinition(this, 'ScalingEventsQuery', {
       queryDefinitionName: `${resourcePrefix}/scaling-events`,
       queryString: new logs.QueryString({
-        fields: ['@timestamp', 'event', 'protection_enabled', 'active_sessions', 'signal', 'elapsed_seconds'],
-        filterStatements: ['event in ["task_protection_updated", "task_protection_all_retries_exhausted", "drain_started", "drain_waiting", "drain_complete"]'],
+        fields: [
+          '@timestamp',
+          'event',
+          'protection_enabled',
+          'active_sessions',
+          'signal',
+          'elapsed_seconds',
+        ],
+        filterStatements: [
+          'event in ["task_protection_updated", "task_protection_all_retries_exhausted", "drain_started", "drain_waiting", "drain_complete"]',
+        ],
         sort: '@timestamp desc',
         limit: 50,
       }),
