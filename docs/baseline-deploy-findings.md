@@ -59,13 +59,13 @@ type object 'ElevenLabsTTSService' has no attribute 'Settings'
 
 **Root cause:** `pipecat-ai.services.elevenlabs.tts.ElevenLabsTTSService.Settings`
 was introduced in pipecat-ai **0.0.106**. The fork's `backend/voice-agent/requirements.txt`
-pins `pipecat-ai[...]==0.0.102`. When the Cartesia → ElevenLabs swap was written
+pinned `pipecat-ai[...]==0.0.102`. When the Cartesia → ElevenLabs swap was written
 (PR #2) the `Settings(voice=, model=)` pattern was carried over verbatim from
 the reference repo (which uses 0.0.106). On 0.0.102 that attribute simply
-doesn't exist.
+didn't exist.
 
-**Fix (applied, committed to main in `f0eeec3`):** use flat kwargs, which both
-Pipecat versions accept:
+**Fix (committed in `f0eeec3`):** use flat kwargs, which all pipecat versions
+accept:
 
 ```python
 return ElevenLabsTTSService(
@@ -75,15 +75,42 @@ return ElevenLabsTTSService(
 )
 ```
 
-Chose this over bumping the Pipecat pin to 0.0.106 because bumping risks
-breaking other fork code paths (bot-runner, SageMaker services, A2A transport)
-that we haven't exercised yet. Flat kwargs is the minimal safe change.
+### Issue 3 — TTS silently produced no audio on the first real call
 
-**Verification:** hit webhook with synthetic payload → ECS task now logs
-`tts_service_created`, `pipeline_assembled`, `pipeline_created`, `daily_joined`,
-`dialin_ready` in that order. No pipeline errors.
+First real phone test: LLM generated the greeting text and the conversation
+observer logged the assistant turn — but the caller heard only silence. No
+TTS audio ever reached the Daily room. Metrics confirmed: `tts_ttfb_ms: null`,
+`bot_speaking_duration_ms: null`, `AvgTTSLatency: 0.0`, and zero
+`bot_started_speaking` events across the entire deploy history.
 
-### Issue 3 — Deploy's post-deploy integration tests reported "some failed"
+**Root cause:** pipecat-ai **0.0.102** has broken ElevenLabs audio context
+initialization. Pipecat PR #3729 (merged Feb 2026, shipped in 0.0.103+) fixed
+two specific bugs: "Added `create_context_id()` override to reuse context IDs
+across multiple `run_tts()` invocations" and "Fixed initialization logic to
+emit `TTSStartedFrame` only once per turn instead of per sentence". A local
+repro on 0.0.102 confirmed the symptoms — service initialized with
+`sample_rate=0` and `run_tts()` raised `TypeError: missing context_id
+positional arg`.
+
+**Fix (committed in `1703e8c`):** bumped pinned version to
+`pipecat-ai[...]>=0.0.106,<0.1.0`. Current deploy runs 0.0.108 which also
+includes PR #4293 (ElevenLabs boolean param handling fixes).
+
+**Verification:** real inbound phone call to +1 (209) 807-5018 with full
+two-way conversation confirmed working. 5-turn exchange, 37.78s duration,
+`CompletionStatus: completed`, agent response latency 1.0–1.2s. Transcript:
+
+```
+[bot]:  Hey there! Welcome, thanks for calling. How can I help you today?
+[user]: Hello?
+[bot]:  Hi! I'm here to help. What can I do for you?
+[user]: What can you do?
+[bot]:  Great question! I can help you with things like answering questions,
+        giving you information, checking the time or date, or just having a
+        conversation. Is there something specific I can help you with today?
+```
+
+### Issue 4 — Deploy's post-deploy integration tests reported "some failed"
 
 Only the first SSM parameter check passed before the script aborted. Almost
 certainly an assertion that expected non-placeholder values in the API keys
@@ -115,7 +142,6 @@ asserting on and either fix its ordering assumption or drop it.
 
 ## What was NOT tested in this pass
 
-- Actual end-to-end phone call (user holds that gate — the call to `+12098075018` is the final verification).
 - SageMaker path for STT/TTS. Fork is in "cloud APIs mode" (`cloud-api-mode-stt-not-deployed` / `cloud-api-mode-tts-not-deployed`) and that's intentional for the baseline.
 - HMAC verification on the webhook Lambda — the stored HMAC secret is retained in the local `.env` for future hardening but nothing currently validates Daily's signed requests against it. Anyone who finds the API Gateway URL can POST to /start. OK for dev, MUST tighten before prod.
 - A2A / capability registry routes. Feature stripped during the baseline fork; no regression test.

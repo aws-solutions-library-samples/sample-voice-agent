@@ -42,17 +42,19 @@ gate by scoping the `eslint` config to our fork's actual edits.
 
 ## Should-fix soon
 
-### 4. Pipecat version pin skew between OG voiceagent and fork
+### 4. Pipecat version pin skew — **RESOLVED**
 
-- `voiceagent` (EC2 prod): `pipecat-ai[...]>=0.0.102`, actual installed
-  version 0.0.106 — `ElevenLabsTTSService.Settings` present.
-- `cosentus-voice-engine` (dev Fargate): `pipecat-ai[...]==0.0.102`, actual
-  installed 0.0.102 — `.Settings` absent. Forced us to use the flat-kwargs
-  API in the TTS factory.
+- `voiceagent` (EC2 prod): `pipecat-ai[...]>=0.0.102`, actual installed 0.0.106.
+- `cosentus-voice-engine` (dev Fargate): originally pinned `==0.0.102`, but
+  0.0.102 had broken ElevenLabs TTS (audio context IDs never initialized,
+  TTSStartedFrame never fired). Bumped to `>=0.0.106,<0.1.0` in commit
+  `1703e8c`. Current deploy runs 0.0.108.
 
-**Decision needed:** bump fork pin to 0.0.106 so the two codebases share a
-single Pipecat API, OR keep the pin low for Fargate image cache stability and
-lock the OG repo back to `==0.0.102` to match.
+**Open question:** should the OG `voiceagent` repo also tighten its pin to
+`>=0.0.106` so the two codebases guarantee shared Pipecat behavior? Right now
+OG is `>=0.0.102` which would re-admit the broken version if anyone does a
+fresh install. Low priority since OG venvs are pinned via lock files, but
+worth fixing for consistency.
 
 ### 5. `cloud-api-mode-stt-not-deployed` / `-tts-not-deployed` in SSM is confusing
 
