@@ -9,6 +9,8 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as path from 'path';
 import { Construct } from 'constructs';
 import { VoiceAgentConfig } from '../config';
@@ -188,11 +190,30 @@ export class EcsStack extends cdk.Stack {
     // =====================
     // Docker Image Build
     // =====================
+    // The main Dockerfile expects BASE_IMAGE to be a pre-baked image with the
+    // Python venv already installed (see backend/voice-agent/Dockerfile.base
+    // and infrastructure/scripts/build-base-image.sh). This lets us skip the
+    // ~8 min pip install on every code-only deploy.
+    //
+    // Resolution order for BASE_IMAGE:
+    //   1. process.env.VOICE_AGENT_BASE_IMAGE  (set by deploy.sh after calling
+    //      build-base-image.sh --uri-only)
+    //   2. Computed from sha256 of requirements.txt + Dockerfile.base, assuming
+    //      the hash-tagged image already exists in ECR at
+    //      ${account}.dkr.ecr.${region}.amazonaws.com/voice-agent-base:req-<hash>
+    //
+    // If neither gives a usable image, `cdk deploy` will fail with a Docker
+    // pull error that names the missing tag — surface the instruction to run
+    // build-base-image.sh.
+    const voiceAgentDir = path.join(__dirname, '..', '..', '..', 'backend', 'voice-agent');
+    const baseImageUri = resolveBaseImageUri(voiceAgentDir, cdk.Stack.of(this));
+
     const containerImage = new ecr_assets.DockerImageAsset(this, 'PipecatImage', {
-      directory: path.join(__dirname, '..', '..', '..', 'backend', 'voice-agent'),
+      directory: voiceAgentDir,
       platform: ecr_assets.Platform.LINUX_AMD64,
       buildArgs: {
         ENVIRONMENT: config.environment,
+        BASE_IMAGE: baseImageUri,
       },
     });
 
@@ -672,4 +693,35 @@ export class EcsStack extends cdk.Stack {
       description: 'CloudMap HTTP Namespace ID',
     });
   }
+}
+
+/**
+ * Resolve the BASE_IMAGE build arg for the voice agent Docker build.
+ *
+ * Must match the tag computation in scripts/build-base-image.sh exactly —
+ * sha256 of (requirements.txt concatenated with Dockerfile.base), first
+ * 16 hex chars, prefixed with "req-".
+ *
+ * Falls back to VOICE_AGENT_BASE_IMAGE env var if set (lets ad-hoc builds
+ * override, e.g. after a local `docker build -f Dockerfile.base -t foo .`).
+ */
+function resolveBaseImageUri(voiceAgentDir: string, stack: cdk.Stack): string {
+  const envOverride = process.env.VOICE_AGENT_BASE_IMAGE;
+  if (envOverride) {
+    return envOverride;
+  }
+
+  const reqPath = path.join(voiceAgentDir, 'requirements.txt');
+  const basePath = path.join(voiceAgentDir, 'Dockerfile.base');
+  const hasher = crypto.createHash('sha256');
+  hasher.update(fs.readFileSync(reqPath));
+  hasher.update(fs.readFileSync(basePath));
+  const hash = hasher.digest('hex').slice(0, 16);
+  const tag = `req-${hash}`;
+
+  const account = stack.account;
+  const region = stack.region;
+  const repoName = process.env.BASE_IMAGE_REPO_NAME || 'voice-agent-base';
+
+  return `${account}.dkr.ecr.${region}.amazonaws.com/${repoName}:${tag}`;
 }
