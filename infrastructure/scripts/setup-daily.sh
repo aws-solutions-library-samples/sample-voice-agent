@@ -160,7 +160,24 @@ if echo "$CONFIG" | jq -e '.error' > /dev/null 2>&1; then
     exit 1
 fi
 
-HMAC=$(echo "$CONFIG" | jq -r '.properties.pinless_dialin[0].hmac')
+# Daily's response shape for POST /v1 is {domain_name, domain_id, config: {...}}
+# — NOT {properties: {...}} (the request body uses `properties` but the response
+# uses `config`). Previous versions of this script read .properties.* and got
+# null, which got saved to .env as the literal string "null" and broke HMAC
+# verification downstream.
+HMAC=$(echo "$CONFIG" | jq -r '.config.pinless_dialin[0].hmac // empty')
+
+if [ -z "$HMAC" ] || [ "$HMAC" = "null" ]; then
+    echo -e "${RED}Error: Daily did not return an HMAC secret in the response.${NC}"
+    echo "Response was:"
+    echo "$CONFIG" | jq '.' 2>/dev/null || echo "$CONFIG"
+    echo ""
+    echo -e "${YELLOW}This breaks webhook signature verification. Aborting so we don't"
+    echo -e "persist a bogus secret. If Daily's response shape has changed, update"
+    echo -e "the jq path in setup-daily.sh.${NC}"
+    exit 1
+fi
+
 echo -e "Webhook configured with HMAC verification"
 echo ""
 
