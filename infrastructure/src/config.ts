@@ -106,8 +106,18 @@ export function loadConfig(app: App): VoiceAgentConfig {
     10
   );
 
+  // NAT gateway defaults scale with environment:
+  //   poc / dev: 1 NAT (~$35/mo saved vs 2, ~$70/mo saved vs 3 — dev rarely
+  //     needs AZ-failure tolerance; worst case one AZ outage = 0 NATs while
+  //     we wait for CFN to swap it out, acceptable for dev)
+  //   staging:   2 NATs (mid-HA, can survive 1 AZ outage)
+  //   prod:      3 NATs (one per AZ, full HA)
+  // Explicit context or NAT_GATEWAYS env override always wins.
+  const defaultNatGateways = environment === 'prod' ? '3' : environment === 'staging' ? '2' : '1';
   const natGateways = parseInt(
-    app.node.tryGetContext(`${prefix}:natGateways`) || process.env.NAT_GATEWAYS || '2',
+    app.node.tryGetContext(`${prefix}:natGateways`) ||
+      process.env.NAT_GATEWAYS ||
+      defaultNatGateways,
     10
   );
 
