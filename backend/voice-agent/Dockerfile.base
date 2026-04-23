@@ -1,0 +1,52 @@
+# Pre-baked base image for the Voice Agent Fargate container.
+#
+# Contains:
+#   - python:3.12-slim
+#   - the virtualenv at /app/venv with every pinned dependency from
+#     requirements.txt (pipecat + extras + aws/daily/elevenlabs/deepgram)
+#
+# Build & push with ./infrastructure/scripts/build-base-image.sh — that script
+# computes sha256(requirements.txt) and tags this image with the hash, so CDK
+# / the main Dockerfile can reference a specific bitwise-reproducible base.
+#
+# Does NOT include:
+#   - application code (changes on every commit, kept in main Dockerfile)
+#   - runtime apt packages (libsndfile/ffmpeg/curl — kept in main Dockerfile
+#     so we can update them without re-rolling the expensive pip install)
+#
+# Rebuild this image when ANY of the following change:
+#   - backend/voice-agent/requirements.txt
+#   - this file (Dockerfile.base)
+#   - the underlying python base image version
+#
+# Does NOT need rebuilding when app code or runtime apt deps change.
+
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Build tools only — these live in the base image and are not carried into
+# the runtime image (the main Dockerfile starts from python:3.12-slim without
+# them, and copies the pre-built /app/venv across).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Requirements baked in at the hash that tags this image. If you bump
+# requirements.txt without rebuilding this base image, the main Dockerfile
+# will still build against the OLD venv — build-base-image.sh refuses to
+# re-tag an already-pushed hash, forcing a new build on changes.
+COPY requirements.txt .
+
+RUN python -m venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Sanity-check: the venv actually installed something. If requirements.txt
+# is somehow empty, fail the base-image build rather than publishing a stub.
+RUN test -d /app/venv/lib/python3.12/site-packages/pipecat

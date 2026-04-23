@@ -145,6 +145,42 @@ synth() {
 }
 
 # ===================================
+# Pre-baked base image
+# ===================================
+# Build & push the voice-agent base image if its content hash changed. The
+# main Dockerfile's FROM line points at voice-agent-base:req-<hash>; if the
+# tag already exists in ECR, this is a no-op (~2s). If requirements.txt or
+# Dockerfile.base changed, we rebuild (~8 min) and push, THEN let CDK build
+# the thin app layer on top (~30s).
+ensure_base_image() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local build_script="$script_dir/scripts/build-base-image.sh"
+
+    if [ ! -x "$build_script" ]; then
+        print_error "Base image builder not found or not executable: $build_script"
+        exit 1
+    fi
+
+    print_status "Ensuring voice-agent base image is present in ECR..."
+    local base_uri
+    base_uri=$("$build_script" --uri-only)
+    export VOICE_AGENT_BASE_IMAGE="$base_uri"
+    print_success "Base image: $VOICE_AGENT_BASE_IMAGE"
+
+    # CDK's docker build needs ECR login to pull the base image referenced
+    # in the app Dockerfile's FROM line. build-base-image.sh also runs this
+    # but only if it actually builds — we need the login here regardless.
+    local account region registry
+    account=$(aws sts get-caller-identity --query Account --output text)
+    region="${AWS_REGION:-us-east-1}"
+    registry="$account.dkr.ecr.$region.amazonaws.com"
+    aws ecr get-login-password --region "$region" \
+        | docker login --username AWS --password-stdin "$registry" >/dev/null 2>&1 \
+        || print_warning "ECR login failed — CDK docker build may fail to pull base image"
+}
+
+# ===================================
 # Deploy
 # ===================================
 deploy() {
@@ -154,6 +190,10 @@ deploy() {
     if [ "${REQUIRE_APPROVAL:-false}" = "true" ]; then
         require_approval="broadening"
     fi
+
+    # Build/push the voice-agent base image if requirements.txt or
+    # Dockerfile.base changed. Exports VOICE_AGENT_BASE_IMAGE for CDK.
+    ensure_base_image
 
     # Deploy stacks in dependency order
     # SSM parameters are used for cross-stack communication, so each stack
@@ -214,6 +254,13 @@ deploy() {
 deploy_stack() {
     local stack_name="$1"
     print_status "Deploying stack: $stack_name..."
+
+    # ECS stack is the only one that consumes the voice-agent image — skip
+    # the base-image build for other stacks so Network/Storage deploys
+    # don't pay the ECR check round-trip.
+    if [ "$stack_name" = "VoiceAgentEcs" ]; then
+        ensure_base_image
+    fi
 
     npx cdk deploy "$stack_name" \
         --require-approval never \

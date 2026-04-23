@@ -1,83 +1,63 @@
-# Voice Agent Pipeline Container for AWS ECS Fargate
-# Build: docker build -t voice-agent .
+# Voice Agent runtime image (Fargate).
 #
-# This container runs pipecat directly with asyncio.run() - the pattern
-# pipecat is designed for. Unlike FastAPI-based approaches, this ensures
-# all of pipecat's internal async tasks execute properly.
+# Thin image that layers application code + runtime apt packages on top of a
+# pre-baked base image containing the full Python venv (see Dockerfile.base).
 #
-# Multi-stage build: build stage compiles any native extensions,
-# runtime stage contains only what's needed to run the application.
-# Note: pipecat v0.0.102 uses ONNX Runtime for Silero VAD (not PyTorch),
-# so torch/torchaudio are not needed.
+# The BASE_IMAGE build arg MUST be set — either to an ECR URI tagged with a
+# specific requirements.txt hash, or (for from-scratch local rebuilds) you
+# can pass BASE_IMAGE=$(docker build -q -f Dockerfile.base .)
+#
+# A typical deploy does:
+#   BASE=$(./infrastructure/scripts/build-base-image.sh --uri-only)
+#   docker build --build-arg BASE_IMAGE="$BASE" -t voice-agent .
+#
+# Code-only changes produce a ~30-second build (vs ~10 min for the full
+# pip install). Changes to requirements.txt require rebuilding the base
+# image too — build-base-image.sh will detect the new hash and do that.
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS builder
+# No-op stage — we only need the builder's /app/venv layer.
 
 # ========================
-# Stage 1: Build / Install
-# ========================
-FROM python:3.12-slim AS builder
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Build tools for any native extensions (gcc, python3-dev)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Copy requirements first for better layer caching
-COPY requirements.txt .
-
-# Install Python dependencies into a virtual env for clean copy
-RUN python -m venv /app/venv
-ENV PATH="/app/venv/bin:$PATH"
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ========================
-# Stage 2: Runtime
+# Runtime
 # ========================
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Runtime-only system dependencies (no gcc/python3-dev)
+# Runtime-only apt packages. Kept OUTSIDE Dockerfile.base so we can patch
+# libsndfile/ffmpeg security updates without re-rolling the heavy pip install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Audio processing
     libsndfile1 \
     ffmpeg \
-    # Networking (health checks)
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser
 
-# Set working directory
 WORKDIR /app
 
-# Copy virtual env with installed packages from builder
-COPY --from=builder /app/venv /app/venv
+# Pre-built venv from Dockerfile.base — the heavy pipecat+deps install is
+# already done, we just copy it over.
+#
+# IMPORTANT: use --chown on every COPY instead of a single `RUN chown -R
+# appuser /app` at the end. A trailing recursive chown touches every byte
+# of the 590 MB venv on EVERY build and invalidates the layer whenever app
+# code changes, adding ~80s per code-only build. --chown sets ownership at
+# copy time, which means the venv's large layer only chown-walks once (when
+# this line itself is invalidated by a base image change), and subsequent
+# code-only changes skip it entirely.
+COPY --chown=appuser:appuser --from=builder /app/venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
-# Copy application code
-COPY app/ ./app/
-
-# Entry point script that handles both service and task modes
-# SERVICE_MODE=true: Run HTTP server (always-on, handles multiple calls)
-# SERVICE_MODE=false/unset: Run single task (legacy mode, one call per container)
-COPY entrypoint.sh /app/entrypoint.sh
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Change ownership to non-root user
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
 USER appuser
 
-# Expose port 8080 for service mode (HTTP server for receiving call requests)
 EXPOSE 8080
 
 CMD ["/app/entrypoint.sh"]
