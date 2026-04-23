@@ -76,6 +76,12 @@ export class WebhookApiConstruct extends Construct {
       environment: {
         ECS_SERVICE_ENDPOINT: props.ecsServiceEndpoint,
         DAILY_API_KEY_SECRET_ARN: props.apiKeySecretArn,
+        // HMAC verification on by default. The Lambda reads DAILY_HMAC_SECRET
+        // from the shared API key secret at runtime and verifies every
+        // webhook's X-Pinless-Signature header against the raw body.
+        // Override to "false" only for emergency rotation scenarios — the
+        // /start endpoint is internet-exposed.
+        DAILY_HMAC_VERIFY: 'true',
         LOG_LEVEL: 'INFO',
       },
     });

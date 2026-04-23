@@ -4,17 +4,25 @@ Unit tests for Bot Runner Lambda handler.
 Run with: pytest test_handler.py -v
 """
 
+import base64
+import hashlib
+import hmac as _hmac
 import json
 import os
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-# Set environment variables before importing handler
+# Set environment variables before importing handler.
+# DAILY_HMAC_VERIFY=false keeps most existing tests unaffected; HMAC-specific
+# tests below override this in-place.
 os.environ["DAILY_API_KEY_SECRET_ARN"] = (
     "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret"
 )
+os.environ["DAILY_HMAC_VERIFY"] = "false"
 
-import handler
+import handler  # noqa: E402
+import hmac_verifier  # noqa: E402
 
 
 class TestStartSession(unittest.TestCase):
@@ -275,6 +283,158 @@ class TestGetSystemPrompt(unittest.TestCase):
         # which would cause context aggregation issues with concurrent text/tool frames
         self.assertIn("tool", prompt.lower())
         self.assertIn("directly", prompt.lower())
+
+
+class TestHmacVerification(unittest.TestCase):
+    """End-to-end tests for HMAC-verified handler path."""
+
+    def setUp(self):
+        hmac_verifier._reset_cache_for_tests()
+        self.secret_bytes = b"test-hmac-secret-32-bytes-long!!"
+        self.secret_b64 = base64.b64encode(self.secret_bytes).decode()
+
+    def tearDown(self):
+        hmac_verifier._reset_cache_for_tests()
+
+    def _signed_event(self, body_dict: dict, *, timestamp: str = None, signature: str = None) -> dict:
+        """Build an API Gateway event signed with our test secret."""
+        # Match API Gateway's raw body delivery: JSON string, no whitespace changes.
+        body_str = json.dumps(body_dict, separators=(",", ":"))
+        ts = timestamp or str(int(time.time()))
+        sig = signature or _hmac.new(
+            self.secret_bytes,
+            ts.encode() + b"." + body_str.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return {
+            "body": body_str,
+            "headers": {
+                "Content-Type": "application/json",
+                "X-Pinless-Signature": sig,
+                "X-Pinless-Timestamp": ts,
+            },
+            "httpMethod": "POST",
+            "path": "/start",
+        }
+
+    def _patch_env_and_secret(self):
+        """Enable HMAC verify + stub Secrets Manager response."""
+        env_patch = patch.dict("os.environ", {"DAILY_HMAC_VERIFY": "true"})
+        handler_patch = patch.object(handler, "_HMAC_VERIFY_ENABLED", True)
+        boto_patch = patch("hmac_verifier.boto3.client")
+        env_patch.start()
+        handler_patch.start()
+        mock_boto = boto_patch.start()
+        mock_sm = MagicMock()
+        mock_sm.get_secret_value.return_value = {
+            "SecretString": json.dumps({"DAILY_HMAC_SECRET": self.secret_b64}),
+        }
+        mock_boto.return_value = mock_sm
+        self.addCleanup(env_patch.stop)
+        self.addCleanup(handler_patch.stop)
+        self.addCleanup(boto_patch.stop)
+
+    def test_bad_signature_returns_401(self):
+        """Tampered signature must return 401 Unauthorized."""
+        self._patch_env_and_secret()
+        event = self._signed_event(
+            {
+                "callId": "test-call",
+                "callDomain": "test.daily.co",
+                "from": "+15551234567",
+            },
+            signature="0" * 64,  # wrong
+        )
+
+        mock_context = MagicMock(aws_request_id="test-req")
+        response = handler.start_session(event, mock_context)
+
+        self.assertEqual(response["statusCode"], 401)
+        body = json.loads(response["body"])
+        self.assertEqual(body["error"], "Unauthorized")
+
+    def test_missing_signature_header_returns_401(self):
+        """Requests without X-Pinless-Signature must return 401."""
+        self._patch_env_and_secret()
+        event = self._signed_event(
+            {
+                "callId": "test-call",
+                "callDomain": "test.daily.co",
+                "from": "+15551234567",
+            },
+        )
+        event["headers"].pop("X-Pinless-Signature")
+
+        mock_context = MagicMock(aws_request_id="test-req")
+        response = handler.start_session(event, mock_context)
+
+        self.assertEqual(response["statusCode"], 401)
+
+    def test_stale_timestamp_returns_401(self):
+        """Replay-attack prevention: timestamps >5 min old must be rejected."""
+        self._patch_env_and_secret()
+        stale_ts = str(int(time.time()) - 600)  # 10 min old
+        event = self._signed_event(
+            {
+                "callId": "test-call",
+                "callDomain": "test.daily.co",
+                "from": "+15551234567",
+            },
+            timestamp=stale_ts,  # signature is computed with this stale ts, so it matches HMAC-wise but will fail skew check
+        )
+
+        mock_context = MagicMock(aws_request_id="test-req")
+        response = handler.start_session(event, mock_context)
+
+        self.assertEqual(response["statusCode"], 401)
+
+    @patch("handler.EcsServiceClient")
+    @patch("handler.DailyClient")
+    def test_valid_signature_passes_through(self, mock_daily_cls, mock_service_cls):
+        """Well-formed signed request reaches the PSTN handler."""
+        self._patch_env_and_secret()
+
+        mock_daily = MagicMock()
+        mock_daily.create_room.return_value = {
+            "url": "https://test.daily.co/voice-x",
+            "name": "voice-x",
+            "id": "room-x",
+        }
+        mock_daily.create_meeting_token.return_value = "token"
+        mock_daily.get_sip_uri.return_value = "sip:room-x@sip.daily.co"
+        mock_daily_cls.return_value = mock_daily
+
+        mock_service = MagicMock()
+        mock_service.start_call.return_value = {"status": "started"}
+        mock_service_cls.return_value = mock_service
+
+        event = self._signed_event(
+            {
+                "callId": "test-call",
+                "callDomain": "test.daily.co",
+                "from": "+15551234567",
+            }
+        )
+
+        mock_context = MagicMock(aws_request_id="test-req")
+        response = handler.start_session(event, mock_context)
+
+        self.assertEqual(response["statusCode"], 200)
+
+    def test_verify_disabled_bypasses_check(self):
+        """With DAILY_HMAC_VERIFY=false, unsigned requests skip auth."""
+        # DAILY_HMAC_VERIFY is set to "false" at module level (setUpModule).
+        # Existing passing tests already prove this — they run without any
+        # signature headers and still reach the body-validation 400.
+        event = {
+            "body": json.dumps({"callDomain": "test.daily.co", "from": "+15551234567"}),
+            "headers": {"Content-Type": "application/json"},
+        }
+        mock_context = MagicMock(aws_request_id="test-req")
+        response = handler.start_session(event, mock_context)
+
+        # Would be 401 if verify was enforced; instead we hit the missing-callId 400.
+        self.assertEqual(response["statusCode"], 400)
 
 
 if __name__ == "__main__":

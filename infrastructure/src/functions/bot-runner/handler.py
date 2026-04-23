@@ -19,11 +19,27 @@ import uuid
 from typing import Any
 
 from daily_client import DailyClient
+from hmac_verifier import (
+    SIGNATURE_HEADER,
+    TIMESTAMP_HEADER,
+    VerificationError,
+    load_hmac_secret,
+    verify_signature,
+)
 from service_client import EcsServiceClient
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+# HMAC verification is on by default. Set DAILY_HMAC_VERIFY=false to bypass
+# (e.g., for local dev or during HMAC secret rotation). In production, do NOT
+# disable this — the /start endpoint is internet-exposed.
+_HMAC_VERIFY_ENABLED = os.environ.get("DAILY_HMAC_VERIFY", "true").lower() not in (
+    "false",
+    "0",
+    "no",
+)
 
 
 def start_session(event: dict, context: Any) -> dict:
@@ -57,6 +73,18 @@ def start_session(event: dict, context: Any) -> dict:
     logger.info(f"[{request_id}] Received webhook event")
 
     try:
+        # Verify HMAC signature BEFORE parsing body — an attacker with no
+        # knowledge of the HMAC secret must be rejected before we spend any
+        # effort processing the payload.
+        if _HMAC_VERIFY_ENABLED:
+            try:
+                _verify_request(event)
+            except VerificationError as exc:
+                logger.warning(
+                    f"[{request_id}] HMAC verification failed: {exc}",
+                )
+                return _error_response(401, "Unauthorized")
+
         # Parse request body
         body = _parse_body(event)
         logger.info(f"[{request_id}] Parsed body: {body}")
@@ -293,6 +321,55 @@ def _parse_body(event: dict) -> dict:
             raise ValueError(f"Invalid JSON body: {e}")
 
     return body if isinstance(body, dict) else {}
+
+
+def _verify_request(event: dict) -> None:
+    """
+    Verify the API Gateway event carries a valid Daily HMAC signature.
+
+    Raises VerificationError on any failure.
+
+    API Gateway v1 (REST) lowercases header names in the `headers` dict but
+    preserves case in `multiValueHeaders`. We check both to be safe.
+    """
+    headers = event.get("headers") or {}
+    multi_headers = event.get("multiValueHeaders") or {}
+
+    def _header(name: str) -> str:
+        lookups = [name, name.lower(), name.upper()]
+        for key in lookups:
+            if key in headers and headers[key]:
+                return headers[key]
+            if key in multi_headers and multi_headers[key]:
+                return multi_headers[key][0]
+        return ""
+
+    signature = _header(SIGNATURE_HEADER)
+    timestamp = _header(TIMESTAMP_HEADER)
+
+    # API Gateway delivers the body as a string (possibly base64-encoded
+    # if isBase64Encoded=true). Daily sends JSON so base64 encoding is
+    # unexpected, but handle it defensively.
+    raw_body = event.get("body") or ""
+    if isinstance(raw_body, dict):
+        # Test event with a pre-parsed dict. Serialize to bytes — NOT
+        # byte-identical to Daily's wire format, so signatures for these
+        # events must be recomputed by the test, not copied from a real call.
+        body_bytes = json.dumps(raw_body, separators=(",", ":")).encode("utf-8")
+    elif event.get("isBase64Encoded"):
+        import base64
+
+        body_bytes = base64.b64decode(raw_body)
+    else:
+        body_bytes = raw_body.encode("utf-8") if isinstance(raw_body, str) else b""
+
+    secret = load_hmac_secret()
+    verify_signature(
+        body=body_bytes,
+        signature=signature,
+        timestamp=timestamp,
+        hmac_secret_b64=secret or "",
+    )
 
 
 def _get_system_prompt(caller_id: str) -> str:
