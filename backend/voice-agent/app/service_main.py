@@ -40,11 +40,23 @@ logging.getLogger("pipecat").setLevel(logging.WARNING)
 # Tool calls are already captured in our structured logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-# Suppress pipecat's loguru-based DEBUG logs (loguru ignores stdlib logging levels).
-# These are pipe-linking/VAD-loading messages that add ~48 lines of noise per call.
+# Quiet pipecat's loguru-based DEBUG/INFO chatter, but KEEP WARNING/ERROR so
+# upstream failures (ErrorFrame, exception traces, VAD/transport fatals) are
+# actually visible in CloudWatch. Prior config used `_loguru_logger.disable
+# ("pipecat")` which muted *everything* — that hid the silent-bot regression
+# on 2026-04-24 where AWSBedrockLLMService was catching exceptions and
+# emitting warn-level ErrorFrames nobody could see.
 from loguru import logger as _loguru_logger
 
-_loguru_logger.disable("pipecat")
+_loguru_logger.remove()
+_loguru_logger.add(
+    sys.stderr,
+    level=log_level,
+    filter=lambda record: (
+        not record["name"].startswith("pipecat")
+        or record["level"].no >= 30  # WARNING+
+    ),
+)
 
 # Suppress pipecat-internal deprecation warnings that we cannot fix at source:
 # 1. OpenAILLMContext — Bedrock adapter internally creates AWSBedrockLLMContext
