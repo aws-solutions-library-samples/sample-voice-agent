@@ -428,20 +428,17 @@ async def create_voice_pipeline(
     # =====================
     # LLM Context Setup
     # =====================
-    # Build system prompt with optional KB instructions
-    system_content = (
-        f"{config.system_prompt} "
-        "Your responses will be read aloud via text-to-speech, so keep them "
-        "concise and conversational - typically 1-3 sentences. "
-        "Avoid special characters, URLs, or formatting. "
-        "When the user joins, greet them warmly and ask how you can help."
-    )
+    # config.system_prompt already contains VOICE_WRAPPER (prepended by
+    # app/hydrator.py in service_main._run_pipeline) and per-agent content
+    # from Aurora. Only deployment-level concerns (KB gating) get appended
+    # here.
+    system_content = config.system_prompt
 
     # Add KB instructions if knowledge base is configured
     kb_id = os.environ.get("KB_KNOWLEDGE_BASE_ID")
     if kb_id:
         system_content += (
-            " When answering questions about products, policies, or procedures, "
+            "\n\nWhen answering questions about products, policies, or procedures, "
             "use the search_knowledge_base tool to find accurate information. "
             "Synthesize the retrieved information naturally into your response. "
             "When citing sources, mention the document name conversationally, "

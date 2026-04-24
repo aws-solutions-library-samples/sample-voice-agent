@@ -215,6 +215,7 @@ class PipelineManager:
         system_prompt: Optional[str] = None,
         dialin_settings: Optional[dict] = None,
         agent_id: Optional[str] = None,
+        case_data: Optional[dict] = None,
     ) -> dict:
         """Start a new call pipeline."""
         # Reject calls when draining (SIGTERM received)
@@ -292,6 +293,7 @@ class PipelineManager:
                 system_prompt=system_prompt,
                 dialin_settings=dialin_settings,
                 agent_id=agent_id,
+                case_data=case_data,
             )
         )
         self.active_sessions[session_id] = task
@@ -317,6 +319,7 @@ class PipelineManager:
         system_prompt: Optional[str],
         dialin_settings: Optional[dict],
         agent_id: Optional[str] = None,
+        case_data: Optional[dict] = None,
     ):
         """Run a voice pipeline for a call."""
         # Bind call_id to all logs in this context
@@ -380,10 +383,30 @@ class PipelineManager:
             # Effective system prompt: explicit arg > loaded agent prompt >
             # default AI assistant. Explicit arg wins so local dev + test
             # harnesses can override without touching Aurora.
-            effective_system_prompt = (
+            raw_system_prompt = (
                 system_prompt
                 or (agent_config.system_prompt if agent_config else "")
                 or "You are a helpful AI assistant."
+            )
+
+            # Render Cosentus {{Variable_Name}} placeholders (e.g.
+            # {{Service_Date}}, {{current_time}}, {{Patient_First_Name}})
+            # before the prompt reaches Bedrock. case_data is populated
+            # from the inbound request body for outbound batch calls
+            # (Phase 7D); inbound calls get an empty dict, which strips
+            # unknown placeholders to empty strings. {{current_time}} is
+            # always injected.
+            from app.hydrator import hydrate_prompt
+
+            effective_system_prompt = hydrate_prompt(
+                raw_system_prompt,
+                case_data or {},
+            )
+            logger.info(
+                "system_prompt_hydrated",
+                raw_chars=len(raw_system_prompt),
+                hydrated_chars=len(effective_system_prompt),
+                case_data_keys=sorted((case_data or {}).keys()),
             )
 
             # Voice-id + model + LLM params come from agent_config when
