@@ -22,6 +22,7 @@ from ..schema import ToolDefinition
 from .time_tool import time_tool
 from .transfer_tool import transfer_tool
 from .end_call_tool import end_call_tool
+from .press_digit_tool import press_digit_tool
 
 
 # Complete list of local tools available to the pipeline.
@@ -32,9 +33,9 @@ from .end_call_tool import end_call_tool
 #
 # Order doesn't matter -- tools are registered by name, not position.
 ALL_LOCAL_TOOLS: List[ToolDefinition] = [
-    end_call_tool,    # Aurora: "end_call"
-    transfer_tool,    # Aurora: "transfer_call"     (Phase 7C PR 3)
-    # press_digit_tool,  # Aurora: "press_digit"    (Phase 7C PR 2)
+    end_call_tool,      # Aurora: "end_call"
+    press_digit_tool,   # Aurora: "press_digit"
+    transfer_tool,      # Aurora: "transfer_call"   (Phase 7C PR 3)
     #
     # Internal-only tools (not in Aurora's VALID_TOOL_TYPES — always
     # available to the LLM regardless of agent config):
