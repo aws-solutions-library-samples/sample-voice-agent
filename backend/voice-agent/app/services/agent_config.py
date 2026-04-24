@@ -495,11 +495,25 @@ async def load_agent_config(
 # Map from Aurora's short model name → Bedrock inference profile ID.
 # Add new entries here when the voice team adopts a new Claude version;
 # keep the short names in sync with the Lambda's VALID_LLM_MODELS.
+#
+# IMPORTANT: these are REAL Bedrock inference-profile IDs, not guesses.
+# Verify any additions with:
+#   aws bedrock list-inference-profiles --region us-east-1 \
+#     --query 'inferenceProfileSummaries[?contains(inferenceProfileId,`claude`)].inferenceProfileId'
+# Bedrock's ValidationException for a bad ID is swallowed by pipecat's
+# AWSBedrockLLMService, producing a silent no-op pipeline (no LLM output,
+# no errors in logs) — so a typo here means every call goes to dead air.
+# See incident 2026-04-24 for the receipts.
 _SHORT_TO_BEDROCK: dict[str, str] = {
-    "claude-sonnet-4-6": "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
-    "claude-sonnet-4-5": "us.anthropic.claude-sonnet-4-5-20250514-v1:0",
+    # Sonnet 4.6's inference profile has no date suffix (unlike older Claude
+    # versions). Don't "fix" this by adding one — it'll break the call.
+    "claude-sonnet-4-6": "us.anthropic.claude-sonnet-4-6",
+    "claude-sonnet-4-5": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "claude-sonnet-4": "us.anthropic.claude-sonnet-4-20250514-v1:0",
     "claude-haiku-4-5": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "claude-sonnet-4-5-20250514": "us.anthropic.claude-sonnet-4-5-20250514-v1:0",
+    "claude-opus-4-5": "us.anthropic.claude-opus-4-5-20251101-v1:0",
+    "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1",
+    "claude-opus-4-7": "us.anthropic.claude-opus-4-7",
 }
 
 
