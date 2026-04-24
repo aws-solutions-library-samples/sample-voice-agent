@@ -161,19 +161,74 @@ class DialinSettings:
 
 @dataclass
 class PipelineConfig:
-    """Configuration for the voice pipeline."""
+    """Configuration for the voice pipeline.
 
+    Post Phase-7A, this is populated per-call from the Lambda's
+    /api/agents/:id/runtime-config endpoint rather than env-var defaults.
+    The first block of fields below is the per-call dynamic data (room,
+    tokens, session id); everything below comes from the agent's Aurora
+    row via services/agent_config.py.
+
+    Fields with `None` default that come from the runtime-config end up
+    here only when the load succeeds. Fallback config
+    (AgentConfig.fallback()) supplies equivalent defaults, so the
+    pipeline never reads `None` from a required field at call time.
+    """
+
+    # Per-call dynamic (required)
     room_url: str
     room_token: str
     session_id: str
     system_prompt: str
     voice_id: str
     aws_region: str
+
+    # Runtime-config derived (populated in service_main.py._run_pipeline)
+    agent_name: str = ""
+    agent_id: str = ""
+    agent_version: int = 0
+    first_message: str = ""
+    ivr_goal: str = ""
+
+    # LLM (per-agent)
+    llm_model: str = ""  # short form from Aurora, translate via resolve_bedrock_model_id
+    llm_max_tokens: int = 200
+    llm_temperature: float = 0.7
+    llm_enable_prompt_caching: bool = False
+
+    # TTS (per-agent) — tts_provider + tts_endpoint below are legacy / shared
+    tts_voice_id: str = ""  # superseded by agent config; falls back to `voice_id` if empty
+    tts_model: str = "eleven_turbo_v2_5"
+    tts_stability: Optional[float] = None
+    tts_similarity_boost: Optional[float] = None
+    tts_style: Optional[float] = None
+    tts_use_speaker_boost: Optional[bool] = None
+    tts_speed: Optional[float] = None
+
+    # STT (per-agent)
+    stt_language: str = "en"
+    stt_keywords: List[str] = None  # type: ignore[assignment]
+
+    # Tools (per-agent) — consumed by Phase 7C. Shape: [{type, description, settings}]
+    tools_config: List[Dict[str, Any]] = None  # type: ignore[assignment]
+
+    # Transport / provider (shared infra, env-driven)
     dialin_settings: DialinSettings | None = None
     stt_provider: str = "deepgram"
     tts_provider: str = "elevenlabs"
     stt_endpoint: str = ""
     tts_endpoint: str = ""
+
+    # Observability — logged at pipeline creation
+    config_load_time_ms: float = 0.0
+    config_load_status: str = "loaded"  # 'loaded' | 'fallback' | 'partial'
+
+    def __post_init__(self) -> None:
+        # Mutable default containers — dataclasses won't accept [] / {} inline.
+        if self.stt_keywords is None:
+            self.stt_keywords = []
+        if self.tools_config is None:
+            self.tools_config = []
 
 
 async def create_voice_pipeline(
@@ -205,6 +260,27 @@ async def create_voice_pipeline(
         tts_provider=config.tts_provider,
         stt_endpoint=config.stt_endpoint or "(cloud)",
         tts_endpoint=config.tts_endpoint or "(cloud)",
+    )
+
+    # Phase 7A — audit trail for config loading. Logged once per call so
+    # we can correlate a session_id to the specific agent / version /
+    # load-status that produced this pipeline. Keep in sync with
+    # services/agent_config.py's `agent_config_loaded` event; this is the
+    # "applied" counterpart.
+    logger.info(
+        "agent_config_applied",
+        session_id=config.session_id,
+        agent_id=config.agent_id,
+        agent_name=config.agent_name,
+        agent_version=config.agent_version,
+        config_load_status=config.config_load_status,
+        config_load_time_ms=config.config_load_time_ms,
+        llm_model=config.llm_model or "(env fallback)",
+        tts_voice_id=config.tts_voice_id or "(provider default)",
+        tts_model=config.tts_model,
+        tools_count=len(config.tools_config),
+        first_message_chars=len(config.first_message),
+        system_prompt_chars=len(config.system_prompt),
     )
 
     # =====================
@@ -265,18 +341,28 @@ async def create_voice_pipeline(
     # =====================
     # LLM Service (Bedrock Claude)
     # =====================
-    # Use inference profile ID instead of foundation model ID
-    # This is required for on-demand throughput with newer Claude models
-    llm_model_id = _get_llm_model_id()
+    # Translate the agent's short-form llm_model (e.g. 'claude-sonnet-4-6'
+    # from Aurora) into a Bedrock inference profile ID. Empty / unset falls
+    # back to the LLM_MODEL_ID env var, preserving pre-7A behavior.
+    from app.services.agent_config import resolve_bedrock_model_id
+
+    llm_model_id = resolve_bedrock_model_id(config.llm_model) if config.llm_model else _get_llm_model_id()
     llm = AWSBedrockLLMService(
         model=llm_model_id,
         region=config.aws_region,
         params=AWSBedrockLLMService.InputParams(
-            max_tokens=256,
-            temperature=0.7,
+            max_tokens=config.llm_max_tokens,
+            temperature=config.llm_temperature,
         ),
     )
-    logger.info("llm_service_created", provider="bedrock", model=llm_model_id)
+    logger.info(
+        "llm_service_created",
+        provider="bedrock",
+        model=llm_model_id,
+        max_tokens=config.llm_max_tokens,
+        temperature=config.llm_temperature,
+        enable_prompt_caching=config.llm_enable_prompt_caching,
+    )
 
     # =====================
     # Tool Calling Setup
@@ -505,7 +591,18 @@ async def create_voice_pipeline(
             participant_id=participant.get("id"),
         )
         # Trigger initial greeting by sending context with a user message
-        # Bedrock's Converse API requires conversations to start with a user message
+        # Bedrock's Converse API requires conversations to start with a user
+        # message, so we synthesize one. The user-message content steers the
+        # greeting: when the agent has a first_message configured, we tell
+        # the LLM to use that verbatim; otherwise the LLM picks a greeting.
+        if config.first_message:
+            user_turn_content = (
+                "[The user has just joined the call. "
+                f"Start with this greeting verbatim: {config.first_message}]"
+            )
+        else:
+            user_turn_content = "[The user has just joined the call. Greet them warmly.]"
+
         greeting_messages = [
             {
                 "role": "system",
@@ -513,7 +610,7 @@ async def create_voice_pipeline(
             },
             {
                 "role": "user",
-                "content": "[The user has just joined the call. Greet them warmly.]",
+                "content": user_turn_content,
             },
         ]
         await task.queue_frames(

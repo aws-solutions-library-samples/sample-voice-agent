@@ -202,6 +202,7 @@ class PipelineManager:
         session_id: str,
         system_prompt: Optional[str] = None,
         dialin_settings: Optional[dict] = None,
+        agent_id: Optional[str] = None,
     ) -> dict:
         """Start a new call pipeline."""
         # Reject calls when draining (SIGTERM received)
@@ -278,6 +279,7 @@ class PipelineManager:
                 call_id=call_id,
                 system_prompt=system_prompt,
                 dialin_settings=dialin_settings,
+                agent_id=agent_id,
             )
         )
         self.active_sessions[session_id] = task
@@ -302,6 +304,7 @@ class PipelineManager:
         call_id: str,
         system_prompt: Optional[str],
         dialin_settings: Optional[dict],
+        agent_id: Optional[str] = None,
     ):
         """Run a voice pipeline for a call."""
         # Bind call_id to all logs in this context
@@ -334,12 +337,87 @@ class PipelineManager:
                     sip_uri=dialin_settings.get("sip_uri", ""),
                 )
 
+            # =====================
+            # Phase 7A: load agent runtime config from the Lambda
+            # =====================
+            # When agent_id is provided (Phase 7B wires this from the Daily
+            # inbound webhook — number lookup → inbound_agent_id), fetch the
+            # agent's full config via the voice-api Lambda. If the load fails,
+            # AgentConfig.fallback() returns a generic assistant so the call
+            # still proceeds. See app/services/agent_config.py.
+            #
+            # When agent_id is NOT provided (legacy callers passing a raw
+            # system_prompt), we skip the Lambda fetch and build a minimal
+            # config from the request. This preserves pre-7A behavior for
+            # SIP / test callers and for Phase 7B rollout.
+            agent_config = None
+            config_load_time_ms = 0.0
+            config_load_status = "not_fetched"
+            if agent_id:
+                from app.services.agent_config import load_agent_config
+                import time as _time
+                _started = _time.perf_counter()
+                agent_config = await load_agent_config(agent_id)
+                config_load_time_ms = (_time.perf_counter() - _started) * 1000
+                # load_agent_config never raises; a fallback marker on the
+                # returned model tells us whether it was synthetic.
+                config_load_status = (
+                    "fallback" if agent_config.meta.agent_id == "" else "loaded"
+                )
+
+            # Effective system prompt: explicit arg > loaded agent prompt >
+            # default AI assistant. Explicit arg wins so local dev + test
+            # harnesses can override without touching Aurora.
+            effective_system_prompt = (
+                system_prompt
+                or (agent_config.system_prompt if agent_config else "")
+                or "You are a helpful AI assistant."
+            )
+
+            # Voice-id + model + LLM params come from agent_config when
+            # present; otherwise fall through to the pre-7A ENV / provider
+            # defaults so existing callers aren't broken.
+            if agent_config:
+                effective_voice_id = (
+                    agent_config.tts.voice_id or self.config.providers.voice_id
+                )
+                effective_llm_model = agent_config.llm.model
+                effective_llm_max_tokens = agent_config.llm.max_tokens
+                effective_llm_temperature = agent_config.llm.temperature
+                effective_prompt_caching = agent_config.llm.enable_prompt_caching
+                effective_tts_model = agent_config.tts.model
+                tts_s = agent_config.tts.settings
+                effective_first_message = agent_config.first_message
+                effective_ivr_goal = agent_config.ivr_goal
+                effective_stt_language = agent_config.stt.language
+                effective_stt_keywords = list(agent_config.stt.keywords)
+                effective_tools_config = [t.model_dump() for t in agent_config.tools]
+                effective_agent_name = agent_config.name or (agent_id or "")
+                effective_agent_id = agent_config.meta.agent_id or (agent_id or "")
+                effective_agent_version = agent_config.meta.version
+            else:
+                effective_voice_id = self.config.providers.voice_id
+                effective_llm_model = ""  # pipeline_ecs will fall back to env LLM_MODEL_ID
+                effective_llm_max_tokens = 256  # preserves pre-7A default
+                effective_llm_temperature = 0.7  # preserves pre-7A default
+                effective_prompt_caching = False
+                effective_tts_model = ""
+                tts_s = None
+                effective_first_message = ""
+                effective_ivr_goal = ""
+                effective_stt_language = "en"
+                effective_stt_keywords = []
+                effective_tools_config = []
+                effective_agent_name = ""
+                effective_agent_id = agent_id or ""
+                effective_agent_version = 0
+
             config = PipelineConfig(
                 room_url=room_url,
                 room_token=room_token,
                 session_id=session_id,
-                system_prompt=system_prompt or "You are a helpful AI assistant.",
-                voice_id=self.config.providers.voice_id,
+                system_prompt=effective_system_prompt,
+                voice_id=effective_voice_id,
                 aws_region=os.environ.get("AWS_REGION", "us-east-1"),
                 dialin_settings=dialin,
                 stt_provider=os.environ.get(
@@ -350,6 +428,28 @@ class PipelineManager:
                 ),
                 stt_endpoint=os.environ.get("STT_ENDPOINT_NAME", ""),
                 tts_endpoint=os.environ.get("TTS_ENDPOINT_NAME", ""),
+                # Phase 7A fields (empty strings / defaults preserve pre-7A behavior)
+                agent_name=effective_agent_name,
+                agent_id=effective_agent_id,
+                agent_version=effective_agent_version,
+                first_message=effective_first_message,
+                ivr_goal=effective_ivr_goal,
+                llm_model=effective_llm_model,
+                llm_max_tokens=effective_llm_max_tokens,
+                llm_temperature=effective_llm_temperature,
+                llm_enable_prompt_caching=effective_prompt_caching,
+                tts_voice_id=effective_voice_id,
+                tts_model=effective_tts_model or "eleven_turbo_v2_5",
+                tts_stability=(tts_s.stability if tts_s else None),
+                tts_similarity_boost=(tts_s.similarity_boost if tts_s else None),
+                tts_style=(tts_s.style if tts_s else None),
+                tts_use_speaker_boost=(tts_s.use_speaker_boost if tts_s else None),
+                tts_speed=(tts_s.speed if tts_s else None),
+                stt_language=effective_stt_language,
+                stt_keywords=effective_stt_keywords,
+                tools_config=effective_tools_config,
+                config_load_time_ms=config_load_time_ms,
+                config_load_status=config_load_status,
             )
 
             # Create the pipeline with metrics collector
@@ -529,6 +629,7 @@ async def handle_call(request: web.Request) -> web.Response:
             session_id=session_id,
             system_prompt=data.get("system_prompt"),
             dialin_settings=data.get("dialin_settings"),
+            agent_id=data.get("agent_id"),
         )
 
         status_code = result.pop(

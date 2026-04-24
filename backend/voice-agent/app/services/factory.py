@@ -10,7 +10,7 @@ SageMaker providers use HTTP/2 bidirectional streaming for low-latency, VPC-loca
 """
 
 import os
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import structlog
 
@@ -86,7 +86,23 @@ def create_stt_service(config: "PipelineConfig"):
         if not api_key:
             raise ValueError("DEEPGRAM_API_KEY environment variable required for STT")
 
-        logger.info("stt_provider_selected", provider="deepgram")
+        # TODO(phase-7A-followup): pass config.stt_language + config.stt_keywords
+        # into the DeepgramSTTService constructor. Requires verifying the
+        # pipecat-ai DeepgramSTTService kwarg names for keywords (some versions
+        # accept `keywords=[...]`, others require `LiveOptions`). Not blocking
+        # Chris parity — Chris has empty keywords on prod — but important for
+        # future agents (Cindy's domain terms like EOB, denied claim, etc.).
+        language = getattr(config, "stt_language", "en") or "en"
+        keywords = list(getattr(config, "stt_keywords", []) or [])
+
+        logger.info(
+            "stt_provider_selected",
+            provider="deepgram",
+            language=language,
+            keywords_count=len(keywords),
+            keywords_wired=False,  # flip to True when the TODO above lands
+        )
+
         return DeepgramSTTService(
             api_key=api_key,
             sample_rate=8000,
@@ -153,23 +169,66 @@ def create_tts_service(config: "PipelineConfig"):
                 "ELEVENLABS_API_KEY environment variable required for TTS"
             )
 
-        voice_id = config.voice_id or _ELEVENLABS_DEFAULT_VOICE_ID
+        # Voice-id resolution in order: agent-config tts_voice_id →
+        # legacy config.voice_id → hardcoded default. Phase 7A starts
+        # populating tts_voice_id from the Lambda.
+        voice_id = (
+            getattr(config, "tts_voice_id", "") or config.voice_id
+            or _ELEVENLABS_DEFAULT_VOICE_ID
+        )
+        tts_model = getattr(config, "tts_model", "") or _ELEVENLABS_DEFAULT_MODEL
 
         logger.info(
             "tts_provider_selected",
             provider="elevenlabs",
             voice_id=voice_id,
-            model=_ELEVENLABS_DEFAULT_MODEL,
+            model=tts_model,
+            stability=getattr(config, "tts_stability", None),
+            similarity_boost=getattr(config, "tts_similarity_boost", None),
+            style=getattr(config, "tts_style", None),
+            use_speaker_boost=getattr(config, "tts_use_speaker_boost", None),
+            speed=getattr(config, "tts_speed", None),
         )
+
         # Flat kwargs work on all pipecat versions (>=0.0.102). On 0.0.106+
         # the Settings inner class is also available, but flat kwargs are
         # forward-compatible and simpler. Don't use `settings=Settings(...)`:
         # it was a shim added late and isn't the canonical path.
-        return ElevenLabsTTSService(
-            api_key=api_key,
-            voice_id=voice_id,
-            model=_ELEVENLABS_DEFAULT_MODEL,
-        )
+        #
+        # Per-agent voice tuning (stability / similarity / style / speaker
+        # boost / speed) is passed via `params=` using pipecat's InputParams
+        # inner class. Build only the subset the agent actually set so None
+        # values pass through to ElevenLabs defaults rather than clobbering
+        # them.
+        voice_params_kwargs: dict[str, Any] = {}
+        for attr in (
+            "tts_stability",
+            "tts_similarity_boost",
+            "tts_style",
+            "tts_use_speaker_boost",
+            "tts_speed",
+        ):
+            v = getattr(config, attr, None)
+            if v is not None:
+                # Attr names: tts_stability → stability, tts_similarity_boost → similarity_boost, etc.
+                voice_params_kwargs[attr.removeprefix("tts_")] = v
+
+        service_kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "voice_id": voice_id,
+            "model": tts_model,
+        }
+        if voice_params_kwargs:
+            try:
+                service_kwargs["params"] = ElevenLabsTTSService.InputParams(**voice_params_kwargs)
+            except Exception as exc:  # noqa: BLE001 — fall back to defaults, don't block call
+                logger.warning(
+                    "elevenlabs_input_params_rejected",
+                    error=str(exc),
+                    attempted=voice_params_kwargs,
+                )
+
+        return ElevenLabsTTSService(**service_kwargs)
 
 
 def _resolve_voice_for_sagemaker(voice_id: str | None) -> str:
