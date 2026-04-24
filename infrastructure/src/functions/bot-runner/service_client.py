@@ -72,6 +72,7 @@ class EcsServiceClient:
         session_id: str,
         system_prompt: Optional[str] = None,
         dialin_settings: Optional[dict] = None,
+        agent_id: Optional[str] = None,
     ) -> dict:
         """
         Start a voice call by sending request to the ECS service.
@@ -82,6 +83,11 @@ class EcsServiceClient:
             session_id: Unique session identifier
             system_prompt: Optional custom system prompt
             dialin_settings: Optional dial-in configuration
+            agent_id: Optional agent UUID or name. When set, the Fargate
+                pipeline's Phase 7A runtime-config loader pulls that
+                agent's full config from the voice-api Lambda. Omitted
+                for SIP / legacy callers that still provide a raw
+                ``system_prompt``.
 
         Returns:
             Response from the service
@@ -96,6 +102,9 @@ class EcsServiceClient:
 
         if system_prompt:
             payload["system_prompt"] = system_prompt
+
+        if agent_id:
+            payload["agent_id"] = agent_id
 
         if dialin_settings:
             payload["dialin_settings"] = dialin_settings  # type: ignore

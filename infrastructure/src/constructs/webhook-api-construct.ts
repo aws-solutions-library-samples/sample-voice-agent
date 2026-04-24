@@ -76,12 +76,30 @@ export class WebhookApiConstruct extends Construct {
       environment: {
         ECS_SERVICE_ENDPOINT: props.ecsServiceEndpoint,
         DAILY_API_KEY_SECRET_ARN: props.apiKeySecretArn,
-        // HMAC verification on by default. The Lambda reads DAILY_HMAC_SECRET
-        // from the shared API key secret at runtime and verifies every
-        // webhook's X-Pinless-Signature header against the raw body.
-        // Override to "false" only for emergency rotation scenarios — the
-        // /start endpoint is internet-exposed.
-        DAILY_HMAC_VERIFY: 'true',
+        // HMAC verification: temporarily disabled in dev. The
+        // setup-daily.sh / init-secrets.sh scripts currently persist
+        // the literal string "null" for DAILY_HMAC_SECRET in Secrets
+        // Manager (known bug from the pre-7A hardening work). A
+        // follow-up PR fixes those scripts and flips this back to
+        // 'true'. Until then CDK must match the live override
+        // (DAILY_HMAC_VERIFY=false on the manually-patched Lambda) or
+        // the next deploy will 401 every inbound call.
+        //
+        // /start is internet-exposed, so this is a real hole — don't
+        // leave it open once the secret is persisted correctly.
+        //
+        // Tracked: Phase 7B follow-up, tech-debt item #1.
+        DAILY_HMAC_VERIFY: 'false',
+        // Phase 7B: on every inbound webhook the bot-runner invokes the
+        // voice-api Lambda to resolve the dialed number →
+        // voice_phone_numbers.inbound_agent_id. Same alias the ECS task
+        // uses (see ecs-stack.ts) so prod + dev stay in lockstep.
+        VOICE_API_LAMBDA_NAME: 'medcloud-voice-api:live',
+        // Agent to route to when the dialed number has no row in
+        // voice_phone_numbers (or the lookup Lambda fails open).
+        // Keeps inbound calls working during initial provisioning / if
+        // Aurora is unreachable. Empty = 503 back to Daily.
+        DEFAULT_INBOUND_AGENT: 'chris-claim-status',
         LOG_LEVEL: 'INFO',
       },
     });
@@ -110,6 +128,21 @@ export class WebhookApiConstruct extends Construct {
         effect: iam.Effect.ALLOW,
         actions: ['ssm:GetParameter'],
         resources: [`arn:aws:ssm:*:*:parameter/voice-agent/ecs/*`],
+      })
+    );
+
+    // Phase 7B: bot-runner needs to invoke the voice-api Lambda to look up
+    // which agent a dialed number is assigned to. Same pattern as the ECS
+    // task role (see ecs-stack.ts ~L392). Alias-qualified ARN covers
+    // :live + any future aliases without a redeploy.
+    this.botRunnerFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['lambda:InvokeFunction'],
+        resources: [
+          `arn:aws:lambda:*:*:function:medcloud-voice-api`,
+          `arn:aws:lambda:*:*:function:medcloud-voice-api:*`,
+        ],
       })
     );
 

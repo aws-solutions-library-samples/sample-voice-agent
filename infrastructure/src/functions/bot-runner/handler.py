@@ -26,6 +26,7 @@ from hmac_verifier import (
     load_hmac_secret,
     verify_signature,
 )
+from phone_resolver import resolve_inbound_agent_id
 from service_client import EcsServiceClient
 
 # Configure logging
@@ -101,11 +102,19 @@ def start_session(event: dict, context: Any) -> dict:
 
         # PSTN flow - validate required fields
         from_number = body.get("from", "unknown")
+        to_number = body.get("To") or body.get("to") or ""
 
         if not call_id:
             return _error_response(400, "Missing required field: callId")
         if not call_domain:
             return _error_response(400, "Missing required field: callDomain")
+
+        # Phase 7B: resolve the dialed number → agent via voice-api
+        # Lambda. resolve_inbound_agent_id never raises — returns the
+        # DEFAULT_INBOUND_AGENT fallback on lookup failure. Passing None
+        # drops us into the legacy hardcoded-prompt path, which is only
+        # useful if the fallback env var is also unset.
+        agent_id = resolve_inbound_agent_id(to_number, request_id)
 
         # Initialize clients
         daily_client = DailyClient()
@@ -155,19 +164,30 @@ def start_session(event: dict, context: Any) -> dict:
         sip_uri = daily_client.get_sip_uri(room_name)
         logger.info(f"[{request_id}] SIP URI: {sip_uri}")
 
-        # Step 4: Call the always-on ECS service to handle the call
-        # The service runs an HTTP server that accepts call requests
-        logger.info(f"[{request_id}] Calling ECS service")
+        # Step 4: Call the always-on ECS service to handle the call.
+        # When agent_id is set (Phase 7B path — resolved from the dialed
+        # number), the Fargate pipeline loads that agent's full config
+        # from Aurora and the legacy ``system_prompt`` kwarg is ignored.
+        # We still pass _get_system_prompt() as a safety net for the
+        # edge case where resolve_inbound_agent_id returns None
+        # (fallback env var unset AND no DB row) — in that scenario the
+        # Fargate side falls back to the generic "You are a helpful
+        # voice assistant" prompt instead of hanging up.
+        logger.info(
+            f"[{request_id}] Calling ECS service "
+            f"(agent_id={agent_id!r}, to={to_number!r}, from={from_number!r})"
+        )
         service_response = service_client.start_call(
             room_url=room_url,
             room_token=bot_token,
             session_id=session_id,
-            system_prompt=_get_system_prompt(from_number),
+            system_prompt=None if agent_id else _get_system_prompt(from_number),
             dialin_settings={
                 "call_id": call_id,
                 "call_domain": call_domain,
                 "sip_uri": sip_uri,
             },
+            agent_id=agent_id,
         )
         logger.info(
             f"[{request_id}] Service response: {service_response.get('status')}"
