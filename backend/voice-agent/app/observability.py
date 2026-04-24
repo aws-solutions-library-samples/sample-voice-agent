@@ -143,12 +143,28 @@ class MetricsObserver(BaseObserver):
             self._collector.mark_vad_stop()
             logger.debug("metrics_observer_vad_stop")
 
-        # Track first TTS audio (end of E2E latency measurement)
+        # Track first TTS audio — marks the end of E2E latency measurement
+        # (user-stop → first-audio-out). We DO NOT end the turn here
+        # because several per-stage metrics (TTS TTFB, LLM token usage)
+        # are emitted AFTER this frame and need _current_turn to still
+        # be alive on the collector to land. See BotStoppedSpeakingFrame
+        # below for the actual turn-end trigger.
         elif isinstance(frame, TTSStartedFrame):
             if not _is_new_frame(self._seen, data):
                 return
             self._collector.mark_first_audio()
-            # End the turn when bot starts responding
+
+        # End the turn once the bot is completely done speaking. By this
+        # point every downstream processor has had a chance to emit its
+        # metrics (TTS TTFB on first audio chunk, LLM usage at
+        # messageStop, etc.) so nothing arrives too late. Previous
+        # behavior ended the turn on TTSStartedFrame which caused
+        # tts_ttfb_ms / llm_input_tokens / llm_output_tokens to come
+        # back null on any turn where those frames happened to arrive
+        # after TTS started.
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            if not _is_new_frame(self._seen, data):
+                return
             if self._turn_active:
                 self._collector.end_turn()
                 self._turn_active = False
