@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 try:
     from app.tools.capabilities import PipelineCapability, detect_capabilities
     from app.tools.builtin.catalog import ALL_LOCAL_TOOLS
-    from app.tools.builtin import time_tool, transfer_tool
+    from app.tools.builtin import time_tool, transfer_call_tool
     from app.observability import MetricsCollector
 except ImportError:
     pytest.skip(
@@ -102,13 +102,14 @@ class TestPipelineCapabilityEnum:
 
     def test_has_all_expected_members(self):
         """Enum should have all declared capability members."""
+        # TRANSFER_DESTINATION was removed in Phase 7C when transfer_call
+        # moved from env-var config to Aurora per-agent settings.
         expected = {
             "BASIC",
             "TRANSPORT",
             "SIP_SESSION",
             "DTMF_COLLECTION",
             "RECORDING_CONTROL",
-            "TRANSFER_DESTINATION",
         }
         actual = {member.name for member in PipelineCapability}
         assert actual == expected
@@ -136,7 +137,7 @@ class TestPipelineCapabilityEnum:
 
     def test_enum_count(self):
         """Guard against accidentally removing capabilities."""
-        assert len(PipelineCapability) == 6
+        assert len(PipelineCapability) == 5
 
 
 # =============================================================================
@@ -208,29 +209,15 @@ class TestDetectCapabilities:
         caps = detect_capabilities(transport=transport)
         assert PipelineCapability.RECORDING_CONTROL not in caps
 
-    def test_transfer_destination_env_var_present(self, monkeypatch):
-        """TRANSFER_DESTINATION env var enables TRANSFER_DESTINATION capability."""
-        monkeypatch.setenv("TRANSFER_DESTINATION", "sip:agent@test.com:5060")
-        caps = detect_capabilities(transport=None)
-        assert PipelineCapability.TRANSFER_DESTINATION in caps
-
-    def test_transfer_destination_env_var_absent(self, monkeypatch):
-        """No TRANSFER_DESTINATION env var means no TRANSFER_DESTINATION capability."""
-        monkeypatch.delenv("TRANSFER_DESTINATION", raising=False)
-        caps = detect_capabilities(transport=None)
-        assert PipelineCapability.TRANSFER_DESTINATION not in caps
-
-    def test_transfer_destination_empty_string(self, monkeypatch):
-        """Empty TRANSFER_DESTINATION env var should not enable capability."""
-        monkeypatch.setenv("TRANSFER_DESTINATION", "")
-        caps = detect_capabilities(transport=None)
-        assert PipelineCapability.TRANSFER_DESTINATION not in caps
-
     def test_full_capability_detection(
-        self, mock_transport_full, sip_session_tracker, monkeypatch
+        self, mock_transport_full, sip_session_tracker
     ):
-        """All capabilities detected with full environment."""
-        monkeypatch.setenv("TRANSFER_DESTINATION", "sip:agent@test.com:5060")
+        """All capabilities detected with full environment.
+
+        Note: pre-Phase-7C this also included TRANSFER_DESTINATION
+        gated on an env var. That capability was removed when
+        transfer_call moved to Aurora per-agent settings.
+        """
         caps = detect_capabilities(
             transport=mock_transport_full,
             sip_session_tracker=sip_session_tracker,
@@ -242,7 +229,6 @@ class TestDetectCapabilities:
                 PipelineCapability.SIP_SESSION,
                 PipelineCapability.DTMF_COLLECTION,
                 PipelineCapability.RECORDING_CONTROL,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
         assert caps == expected
@@ -295,7 +281,6 @@ class TestToolDefinitionRequires:
             {
                 PipelineCapability.TRANSPORT,
                 PipelineCapability.SIP_SESSION,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
         tool = ToolDefinition(
@@ -313,15 +298,14 @@ class TestToolDefinitionRequires:
         assert time_tool.requires == frozenset({PipelineCapability.BASIC})
 
     def test_transfer_tool_requires_transport_sip_destination(self):
-        """transfer_tool should require TRANSPORT, SIP_SESSION, TRANSFER_DESTINATION."""
+        """transfer_call_tool should require TRANSPORT, SIP_SESSION (TRANSFER_DESTINATION removed in 7C)."""
         expected = frozenset(
             {
                 PipelineCapability.TRANSPORT,
                 PipelineCapability.SIP_SESSION,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
-        assert transfer_tool.requires == expected
+        assert transfer_call_tool.requires == expected
 
 
 # =============================================================================
@@ -336,7 +320,7 @@ class TestCatalogFiltering:
         """ALL_LOCAL_TOOLS should contain time and transfer tools."""
         tool_names = {tool.name for tool in ALL_LOCAL_TOOLS}
         assert "get_current_time" in tool_names
-        assert "transfer_to_agent" in tool_names
+        assert "transfer_call" in tool_names
 
     def test_catalog_has_at_least_two_tools(self):
         """Catalog must have at least the two core tools."""
@@ -352,7 +336,7 @@ class TestCatalogFiltering:
         ]
         names = {t.name for t in passed}
         assert "get_current_time" in names
-        assert "transfer_to_agent" not in names
+        assert "transfer_call" not in names
 
     def test_full_capabilities_include_all_tools(self, monkeypatch):
         """With all capabilities, all catalog tools should pass."""
@@ -363,7 +347,6 @@ class TestCatalogFiltering:
                 PipelineCapability.SIP_SESSION,
                 PipelineCapability.DTMF_COLLECTION,
                 PipelineCapability.RECORDING_CONTROL,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
         passed = [
@@ -389,7 +372,7 @@ class TestCatalogFiltering:
         ]
         names = {t.name for t in passed}
         assert "get_current_time" in names
-        assert "transfer_to_agent" not in names
+        assert "transfer_call" not in names
 
     def test_disabled_tools_override_filters_even_when_capable(self):
         """disabled_tools config should skip tools even when capabilities are met."""
@@ -398,10 +381,9 @@ class TestCatalogFiltering:
                 PipelineCapability.BASIC,
                 PipelineCapability.TRANSPORT,
                 PipelineCapability.SIP_SESSION,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
-        disabled = {"transfer_to_agent"}
+        disabled = {"transfer_call"}
 
         passed = [
             tool
@@ -411,7 +393,7 @@ class TestCatalogFiltering:
         ]
         names = {t.name for t in passed}
         assert "get_current_time" in names
-        assert "transfer_to_agent" not in names
+        assert "transfer_call" not in names
 
     def test_disabled_tools_can_disable_basic_tool(self):
         """Even BASIC tools can be disabled via config."""
@@ -434,7 +416,6 @@ class TestCatalogFiltering:
                 PipelineCapability.BASIC,
                 PipelineCapability.TRANSPORT,
                 PipelineCapability.SIP_SESSION,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
         disabled: set = set()
@@ -458,8 +439,8 @@ class TestRegisterToolsIntegration:
 
     @pytest.fixture(autouse=True)
     def set_transfer_destination(self, monkeypatch):
-        """Set TRANSFER_DESTINATION for tests that need it."""
-        monkeypatch.setenv("TRANSFER_DESTINATION", "sip:agent@test.example.com:5060")
+        """Phase 7C: TRANSFER_DESTINATION removed; this fixture is now a no-op kept for fixture-name backcompat."""
+        # (intentionally empty — env var no longer drives transfer_call gating)
 
     @pytest.mark.asyncio
     async def test_basic_capabilities_registers_only_time(self, metrics_collector):
@@ -484,7 +465,7 @@ class TestRegisterToolsIntegration:
         )
 
         assert "get_current_time" in registered
-        assert "transfer_to_agent" not in registered
+        assert "transfer_call" not in registered
         assert len(registered) == 1
         # Bedrock tools list should also have 1 entry
         assert len(bedrock_tools) == 1
@@ -508,7 +489,6 @@ class TestRegisterToolsIntegration:
                 PipelineCapability.BASIC,
                 PipelineCapability.TRANSPORT,
                 PipelineCapability.SIP_SESSION,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
         bedrock_tools = _register_tools(
@@ -520,7 +500,7 @@ class TestRegisterToolsIntegration:
         )
 
         assert "get_current_time" in registered
-        assert "transfer_to_agent" in registered
+        assert "transfer_call" in registered
         assert "hangup_call" in registered
         assert len(registered) == 3
         assert len(bedrock_tools) == 3
@@ -549,7 +529,7 @@ class TestRegisterToolsIntegration:
 
         # Should default to BASIC, registering only time tool
         assert "get_current_time" in registered
-        assert "transfer_to_agent" not in registered
+        assert "transfer_call" not in registered
 
     @pytest.mark.asyncio
     async def test_returns_function_schema_tool_specs(self, metrics_collector):

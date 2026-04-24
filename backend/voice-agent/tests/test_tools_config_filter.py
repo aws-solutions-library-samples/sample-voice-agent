@@ -140,8 +140,9 @@ class TestToolsConfigFiltering:
 
     def test_capability_gating_still_applies_to_aurora_tools(self):
         # A tool whose requires aren't met should NOT register, even if
-        # the agent has it in tools_config. Transfer without SIP
-        # session + TRANSFER_DESTINATION is a typical case.
+        # the agent has it in tools_config. transfer_call needs both
+        # TRANSPORT and SIP_SESSION; with TRANSPORT-only it should be
+        # skipped.
         llm = _fake_llm()
         caps_without_sip = frozenset({PipelineCapability.BASIC, PipelineCapability.TRANSPORT})
         _register_tools(
@@ -151,15 +152,18 @@ class TestToolsConfigFiltering:
             available_capabilities=caps_without_sip,
             tools_config=[
                 {"type": "end_call", "description": "", "settings": {}},
-                {"type": "transfer_call", "description": "", "settings": {}},
+                {
+                    "type": "transfer_call",
+                    "description": "",
+                    "settings": {"targets": {"x": "+15551234567"}},
+                },
             ],
         )
         registered = {
             call.kwargs.get("function_name") for call in llm.register_function.call_args_list
         }
         assert "end_call" in registered
-        # transfer_call requires TRANSFER_DESTINATION (config cap), which
-        # isn't in our caps set, so it should be skipped.
+        # transfer_call requires SIP_SESSION (not in our caps), skipped.
         assert "transfer_call" not in registered
 
     def test_malformed_config_entries_skipped_safely(self):

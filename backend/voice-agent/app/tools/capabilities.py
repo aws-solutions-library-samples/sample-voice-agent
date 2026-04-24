@@ -63,9 +63,14 @@ class PipelineCapability(Enum):
           recording (needed for PCI-DSS compliance during payment collection).
 
     Configuration capabilities:
-        Require specific environment variables or config to be set.
-        - TRANSFER_DESTINATION: The TRANSFER_DESTINATION environment variable
-          is set to a valid SIP URI, enabling call transfers.
+        (Removed in Phase 7C.) Pre-7C we probed for a TRANSFER_DESTINATION
+        env var here because transfer_tool was env-var-driven. 7C moved
+        transfer targets to the per-agent Aurora config
+        (voice_agents.tools[].settings.targets), so the capability is no
+        longer meaningful — transfer_call simply requires TRANSPORT +
+        SIP_SESSION, and the Aurora tools_config filter in
+        _register_tools handles whether the tool is actually enabled
+        for a given agent.
     """
 
     # Always available -- no special requirements
@@ -76,9 +81,6 @@ class PipelineCapability(Enum):
     SIP_SESSION = "sip_session"
     DTMF_COLLECTION = "dtmf_collection"
     RECORDING_CONTROL = "recording_control"
-
-    # Configuration capabilities
-    TRANSFER_DESTINATION = "transfer_destination"
 
 
 def detect_capabilities(
@@ -124,10 +126,6 @@ def detect_capabilities(
         # Recording control requires transport methods for pause/resume.
         if hasattr(transport, "pause_recording"):
             caps.add(PipelineCapability.RECORDING_CONTROL)
-
-    # Configuration-based capabilities
-    if os.environ.get("TRANSFER_DESTINATION"):
-        caps.add(PipelineCapability.TRANSFER_DESTINATION)
 
     result = frozenset(caps)
 

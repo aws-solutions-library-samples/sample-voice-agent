@@ -24,7 +24,7 @@ try:
         success_result,
         error_result,
     )
-    from app.tools.builtin import time_tool, transfer_tool
+    from app.tools.builtin import time_tool, transfer_call_tool
     from app.observability import MetricsCollector
 except ImportError:
     pytest.skip(
@@ -53,7 +53,7 @@ def full_registry():
     """Create a registry with all builtin tools."""
     registry = ToolRegistry()
     registry.register(time_tool)
-    registry.register(transfer_tool)
+    registry.register(transfer_call_tool)
     return registry
 
 
@@ -63,10 +63,11 @@ def executor_with_metrics(full_registry, metrics_collector):
     return ToolExecutor(full_registry, metrics_collector)
 
 
-@pytest.fixture(autouse=True)
-def set_transfer_destination(monkeypatch):
-    """Set TRANSFER_DESTINATION env var for transfer tool tests."""
-    monkeypatch.setenv("TRANSFER_DESTINATION", "sip:agent@test.example.com:5060")
+# Phase 7C dropped the env-var-driven TRANSFER_DESTINATION in favor
+# of per-agent Aurora settings.targets. The autouse fixture that
+# used to setenv("TRANSFER_DESTINATION", ...) is no longer needed —
+# transfer_call_tool reads the targets dict from
+# ToolContext.tool_settings instead.
 
 
 @pytest.fixture
@@ -84,6 +85,10 @@ def base_context():
         ],
         transport=mock_transport,
         sip_session_id="test-sip-session",
+        # Mock Aurora settings — single target named "billing" for the
+        # integration tests below to invoke. Real configs may have
+        # several named targets per agent.
+        tool_settings={"targets": {"billing": "+15555550100"}},
     )
 
 
@@ -113,21 +118,16 @@ class TestEndToEndToolExecution:
 
     @pytest.mark.asyncio
     async def test_transfer_tool_e2e(self, executor_with_metrics, base_context):
-        """Test transfer tool end-to-end."""
+        """Test transfer tool end-to-end with Aurora-style target name."""
         result = await executor_with_metrics.execute(
-            tool_name="transfer_to_agent",
-            arguments={
-                "reason": "Customer needs billing help",
-                "department": "billing",
-                "priority": "high",
-            },
+            tool_name="transfer_call",
+            arguments={"target": "billing"},
             context=base_context,
         )
 
         assert result.status == ToolStatus.SUCCESS
         assert result.content["transfer_initiated"] is True
-        assert result.content["department"] == "billing"
-        assert result.content["priority"] == "high"
+        assert result.content["target"] == "billing"
         assert "billing" in result.content["message"]
 
     @pytest.mark.asyncio
@@ -144,11 +144,8 @@ class TestEndToEndToolExecution:
         ]
 
         result = await executor_with_metrics.execute(
-            tool_name="transfer_to_agent",
-            arguments={
-                "reason": "Double charge issue",
-                "department": "billing",
-            },
+            tool_name="transfer_call",
+            arguments={"target": "billing"},
             context=base_context,
         )
 
@@ -185,8 +182,8 @@ class TestSequentialToolCalls:
 
         # Second call: transfer
         result2 = await executor_with_metrics.execute(
-            tool_name="transfer_to_agent",
-            arguments={"reason": "Testing", "department": "general"},
+            tool_name="transfer_call",
+            arguments={"target": "billing"},
             context=base_context,
         )
         assert result2.status == ToolStatus.SUCCESS
@@ -532,10 +529,11 @@ class TestPipelineHandlerIntegration:
             available_capabilities=frozenset({PipelineCapability.BASIC}),
         )
 
-        # Only get_current_time (BASIC) should register; transfer_to_agent
-        # requires TRANSPORT + SIP_SESSION + TRANSFER_DESTINATION
+        # Only get_current_time (BASIC) should register; transfer_call
+        # requires TRANSPORT + SIP_SESSION (Phase 7C dropped TRANSFER_
+        # DESTINATION; gating now happens via tools_config + capabilities)
         assert "get_current_time" in registered_functions
-        assert "transfer_to_agent" not in registered_functions
+        assert "transfer_call" not in registered_functions
         assert len(registered_functions) == 1
 
     @pytest.mark.asyncio
@@ -555,14 +553,17 @@ class TestPipelineHandlerIntegration:
 
         mock_llm.register_function = capture_registration
 
-        # Register with full capabilities including transport/SIP/transfer
+        # Register with full capabilities. Phase 7C: TRANSFER_DESTINATION
+        # capability removed; transfer_call now gates only on
+        # TRANSPORT + SIP_SESSION + Aurora settings.targets non-empty.
+        # Aurora-configurable tools (end_call, transfer_call,
+        # press_digit) need to be in tools_config to register.
         mock_transport = MagicMock()
         full_caps = frozenset(
             {
                 PipelineCapability.BASIC,
                 PipelineCapability.TRANSPORT,
                 PipelineCapability.SIP_SESSION,
-                PipelineCapability.TRANSFER_DESTINATION,
             }
         )
         _register_tools(
@@ -571,13 +572,24 @@ class TestPipelineHandlerIntegration:
             mock_transport,
             collector=metrics_collector,
             available_capabilities=full_caps,
+            tools_config=[
+                {"type": "end_call", "description": "", "settings": {}},
+                {
+                    "type": "transfer_call",
+                    "description": "",
+                    "settings": {"targets": {"billing": "+15555550100"}},
+                },
+                {"type": "press_digit", "description": "", "settings": {}},
+            ],
         )
 
-        # All tools with matching capabilities should be registered
+        # All tools with matching capabilities should be registered.
+        # get_current_time is internal (always registers).
         assert "get_current_time" in registered_functions
-        assert "transfer_to_agent" in registered_functions
-        assert "hangup_call" in registered_functions
-        assert len(registered_functions) == 3
+        assert "transfer_call" in registered_functions
+        assert "end_call" in registered_functions
+        assert "press_digit" in registered_functions
+        assert len(registered_functions) == 4
 
     @pytest.mark.asyncio
     async def test_registered_handler_executes_correctly(
@@ -654,16 +666,16 @@ class TestErrorHandlingIntegration:
             turn_number=1,
         )
 
-        # Missing required 'reason' parameter for transfer_to_agent
+        # Missing required 'target' parameter for transfer_call
         result = await executor.execute(
-            tool_name="transfer_to_agent",
-            arguments={},  # Missing 'reason'
+            tool_name="transfer_call",
+            arguments={},  # Missing 'target'
             context=context,
         )
 
         assert result.status == ToolStatus.ERROR
         assert result.error_code == "INVALID_ARGUMENTS"
-        assert "reason" in result.error_message.lower()
+        assert "target" in result.error_message.lower()
 
     @pytest.mark.asyncio
     async def test_unknown_tool_handled_gracefully(self, full_registry):

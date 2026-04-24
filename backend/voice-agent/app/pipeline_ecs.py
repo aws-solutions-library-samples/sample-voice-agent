@@ -371,7 +371,7 @@ async def create_voice_pipeline(
     tools_list: List[Any] = []
 
     # Deferred reference to PipelineTask for tool-initiated frame queuing.
-    # Tools (e.g., end_call) need to push EndFrame into the pipeline,
+    # Tools (e.g., hangup_call) need to push EndFrame into the pipeline,
     # but _register_tools() runs before the PipelineTask is created.
     # This mutable container is captured by the closure and populated later.
     task_ref: Dict[str, Optional[PipelineTask]] = {"task": None}
@@ -792,16 +792,42 @@ def _register_tools(
             # to the fork's hardcoded description when Aurora didn't
             # supply one (defensive — the Lambda schema requires it
             # on write but older rows might be blank).
+            from dataclasses import replace
+
             aurora_description = (aurora_entry.get("description") or "").strip()
             if aurora_description:
-                from dataclasses import replace
-
                 tool = replace(tool, description=aurora_description)
 
             # Capture settings for executor access at call time.
             aurora_settings = aurora_entry.get("settings") or {}
             if isinstance(aurora_settings, dict):
                 tool_settings_by_name[tool.name] = aurora_settings
+
+            # transfer_call special-case: rewrite the ``target`` parameter
+            # with a dynamic enum drawn from the agent's configured
+            # target names. This gives Claude a hard constraint instead
+            # of hoping it picks a valid name from free-text. Matches
+            # OG _build_tool_schemas (core/pipeline.py:289).
+            if tool.name == "transfer_call":
+                targets = aurora_settings.get("targets") if isinstance(aurora_settings, dict) else None
+                if isinstance(targets, dict) and targets:
+                    target_names = sorted(targets.keys())
+                    new_parameters = []
+                    for p in tool.parameters:
+                        if p.name == "target":
+                            new_parameters.append(
+                                replace(
+                                    p,
+                                    enum=target_names,
+                                    description=(
+                                        f"Name of the transfer target. "
+                                        f"Must be one of: {', '.join(target_names)}."
+                                    ),
+                                )
+                            )
+                        else:
+                            new_parameters.append(p)
+                    tool = replace(tool, parameters=new_parameters)
 
         # Check capability requirements (always, regardless of config source).
         tool_requires = tool.requires or frozenset({PipelineCapability.BASIC})
@@ -888,7 +914,7 @@ def _register_tools(
 
             # Return result through Pipecat's callback
             # Build optional properties to control post-tool LLM behavior.
-            # Tools like end_call set run_llm=False to suppress the
+            # Tools like hangup_call set run_llm=False to suppress the
             # redundant LLM re-inference that would otherwise add ~2s of
             # dead air before the pipeline actually disconnects.
             properties = None

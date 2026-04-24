@@ -201,9 +201,5 @@ class TestHangupCapabilityGating:
         assert not (end_call_tool.requires <= available)
 
     def test_does_not_require_sip_session(self):
-        """Hangup should work for both SIP and WebRTC -- no SIP required."""
+        """end_call should work for both SIP and WebRTC — no SIP required."""
         assert PipelineCapability.SIP_SESSION not in end_call_tool.requires
-
-    def test_does_not_require_transfer_destination(self):
-        """Hangup doesn't need a transfer destination."""
-        assert PipelineCapability.TRANSFER_DESTINATION not in end_call_tool.requires
