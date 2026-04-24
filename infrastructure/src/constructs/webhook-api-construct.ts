@@ -76,20 +76,17 @@ export class WebhookApiConstruct extends Construct {
       environment: {
         ECS_SERVICE_ENDPOINT: props.ecsServiceEndpoint,
         DAILY_API_KEY_SECRET_ARN: props.apiKeySecretArn,
-        // HMAC verification: temporarily disabled in dev. The
-        // setup-daily.sh / init-secrets.sh scripts currently persist
-        // the literal string "null" for DAILY_HMAC_SECRET in Secrets
-        // Manager (known bug from the pre-7A hardening work). A
-        // follow-up PR fixes those scripts and flips this back to
-        // 'true'. Until then CDK must match the live override
-        // (DAILY_HMAC_VERIFY=false on the manually-patched Lambda) or
-        // the next deploy will 401 every inbound call.
+        // HMAC verification on. The bot-runner reads DAILY_HMAC_SECRET
+        // from the shared API key secret at runtime and verifies every
+        // webhook's X-Pinless-Signature header against the raw body.
+        // Override to 'false' only for emergency rotation scenarios —
+        // the /start endpoint is internet-exposed.
         //
-        // /start is internet-exposed, so this is a real hole — don't
-        // leave it open once the secret is persisted correctly.
-        //
-        // Tracked: Phase 7B follow-up, tech-debt item #1.
-        DAILY_HMAC_VERIFY: 'false',
+        // Re-enabled 2026-04-24 after re-running pinless_dialin
+        // configuration against Daily and persisting the returned HMAC
+        // to Secrets Manager. See docs/lambda-patches if this breaks
+        // and you need to rotate again.
+        DAILY_HMAC_VERIFY: 'true',
         // Phase 7B: on every inbound webhook the bot-runner invokes the
         // voice-api Lambda to resolve the dialed number →
         // voice_phone_numbers.inbound_agent_id. Same alias the ECS task
