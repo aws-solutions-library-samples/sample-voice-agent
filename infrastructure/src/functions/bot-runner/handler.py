@@ -43,6 +43,50 @@ _HMAC_VERIFY_ENABLED = os.environ.get("DAILY_HMAC_VERIFY", "true").lower() not i
 )
 
 
+def route(event: dict, context: Any) -> dict:
+    """Dispatch the API Gateway event to the right handler.
+
+    The bot-runner Lambda is wired to two API Gateway routes:
+
+      POST /start    — Daily inbound webhook (HMAC-verified). Goes to
+                       start_session.
+      POST /dial-out — Outbound dialing trigger (Phase 7D). IAM-auth
+                       only; goes to start_dial_out.
+
+    Lambda exposes one handler entry per function, so we route on the
+    request path here. Lambda functions called via lambda:Invoke
+    (e.g. from the SQS consumer) can either pass an event with
+    ``rawPath="/dial-out"`` or omit the path and set ``invocation_type``
+    in the body — we accept both.
+    """
+    raw_path = (
+        event.get("rawPath")
+        or event.get("path")
+        or event.get("requestContext", {}).get("http", {}).get("path")
+        or ""
+    )
+    body_for_check = event.get("body")
+    if isinstance(body_for_check, str):
+        try:
+            parsed = json.loads(body_for_check)
+        except Exception:
+            parsed = {}
+    else:
+        parsed = body_for_check or {}
+
+    # Allow callers (e.g. SQS consumer doing direct lambda:Invoke
+    # without an API Gateway event shape) to ask for dial-out via the
+    # body field. Convenient for ad-hoc operator scripts too.
+    invocation_type = (parsed or {}).get("invocation_type") if isinstance(parsed, dict) else None
+
+    if raw_path.endswith("/dial-out") or invocation_type == "dial_out":
+        return start_dial_out(event, context)
+
+    # Default: inbound webhook. Includes /start and any unrecognized
+    # path so existing callers don't break.
+    return start_session(event, context)
+
+
 def start_session(event: dict, context: Any) -> dict:
     """
     Handle Daily dial-in webhook and spawn voice session.
@@ -221,6 +265,186 @@ def start_session(event: dict, context: Any) -> dict:
         return _error_response(400, str(e))
     except Exception as e:
         logger.exception(f"[{request_id}] Unexpected error: {e}")
+        return _error_response(500, "Internal server error")
+
+
+def start_dial_out(event: dict, context: Any) -> dict:
+    """
+    Phase 7D: outbound batch dialing.
+
+    Creates a Daily room, generates a bot token, asks Daily to ring
+    the target PSTN number from that room, and POSTs the room
+    handles to the ECS pipeline so the agent is in the room and
+    speaking the moment the target picks up.
+
+    Expected request body (from the SQS consumer or any other caller
+    with lambda:Invoke permission on this function):
+
+        {
+          "to_number":   "+15551234567",       (required, E.164)
+          "from_number": "+12098075018",       (required, E.164 — must be
+                                                a number provisioned in
+                                                Daily for outbound)
+          "agent_id":    "chris-claim-status", (required; UUID or name)
+          "case_data":   {...},                (optional; hydrator dict)
+          "session_id":  "..."                 (optional; auto-generated
+                                                from a UUID if absent)
+        }
+
+    Returns:
+
+        {
+          "session_id": "voice-out-...",
+          "room_url":   "https://cosentus.daily.co/voice-out-...",
+          "dial_out":   <Daily dialOut response>,
+          "status":     "started"
+        }
+
+    Auth: this handler is NOT exposed via the HMAC-verified webhook
+    path. It's expected to be invoked via lambda:InvokeFunction (IAM
+    auth) by trusted same-account callers — the SQS consumer in
+    Phase 7D PR 2, ad-hoc operator scripts, etc.
+    """
+    request_id = context.aws_request_id if context else str(uuid.uuid4())
+    logger.info(f"[{request_id}] dial-out request received")
+
+    try:
+        body = _parse_body(event)
+
+        to_number = (body.get("to_number") or "").strip()
+        from_number = (body.get("from_number") or "").strip()
+        agent_id = (body.get("agent_id") or "").strip() or None
+        case_data = body.get("case_data") or {}
+
+        if not to_number:
+            return _error_response(400, "Missing required field: to_number")
+        if not from_number:
+            return _error_response(400, "Missing required field: from_number")
+        if not agent_id:
+            return _error_response(400, "Missing required field: agent_id")
+        if not isinstance(case_data, dict):
+            return _error_response(400, "case_data must be an object")
+
+        session_id = body.get("session_id") or f"voice-out-{uuid.uuid4().hex[:12]}"
+
+        daily_client = DailyClient()
+        service_client = EcsServiceClient()
+
+        # Step 1: create Daily room. Outbound rooms don't need
+        # pinless_dialin — they only need SIP enabled so Daily can
+        # bridge the dialOut leg into them.
+        logger.info(f"[{request_id}] creating outbound Daily room")
+        room = daily_client.create_room(
+            name=f"voice-out-{uuid.uuid4().hex[:12]}",
+            properties={
+                "enable_chat": False,
+                "enable_screenshare": False,
+                "enable_recording": False,
+                "enable_transcription": False,
+                "sip": {
+                    "display_name": "Voice Assistant",
+                    "video": False,
+                    # ``dial-out`` mode tells Daily this room is for
+                    # OUTBOUND calling. The room won't accept inbound
+                    # SIP. dialOut creates a leg from the room to a
+                    # PSTN target.
+                    "sip_mode": "dial-out",
+                },
+                "exp": int(time.time()) + 3600,
+            },
+        )
+        room_url = room["url"]
+        room_name = room["name"]
+        logger.info(f"[{request_id}] room created: {room_name}")
+
+        # Step 2: bot meeting token (owner — Daily's dialOut requires
+        # owner privilege to initiate from the bot's connection).
+        bot_token = daily_client.create_meeting_token(
+            room_name=room_name,
+            properties={
+                "is_owner": True,
+                "user_name": "Voice Assistant",
+                "enable_screenshare": False,
+                "start_video_off": True,
+                "start_audio_off": False,
+                "exp": int(time.time()) + 3600,
+            },
+        )
+        logger.info(f"[{request_id}] bot token issued")
+
+        # Step 3: hand off to ECS BEFORE dial-out, so the bot is in
+        # the room and listening when the target picks up. There's a
+        # tiny race here — dialOut sends RING before bot fully joins
+        # — but Daily buffers the SIP leg until the room is live.
+        logger.info(
+            f"[{request_id}] handing off to ECS "
+            f"(agent_id={agent_id!r}, to=****{to_number[-4:]})"
+        )
+        service_response = service_client.start_call(
+            room_url=room_url,
+            room_token=bot_token,
+            session_id=session_id,
+            # No system_prompt override on outbound — the agent_id
+            # path supplies the full Aurora config (including
+            # first_message which is what the target hears on pickup).
+            system_prompt=None,
+            # dialin_settings=None signals OUTBOUND in pipeline_ecs;
+            # the participant the pipeline waits for is the dial-out
+            # leg, not an inbound SIP session.
+            dialin_settings=None,
+            agent_id=agent_id,
+            case_data=case_data,
+        )
+
+        if service_response.get("status") not in ("started",):
+            logger.error(
+                f"[{request_id}] ECS rejected outbound: {service_response}"
+            )
+            return _error_response(
+                503,
+                f"Voice agent unavailable: {service_response.get('error', 'unknown')}",
+            )
+
+        # Step 4: dialOut. Daily creates a SIP leg from the room out
+        # to the PSTN target, identifying as `from_number`.
+        logger.info(
+            f"[{request_id}] dialing target ****{to_number[-4:]} "
+            f"from ****{from_number[-4:]}"
+        )
+        try:
+            dial_response = daily_client.dial_out(
+                room_name=room_name,
+                phone_number=to_number,
+                caller_id=from_number,
+            )
+        except ValueError as exc:
+            # dialOut failure means the call won't reach the target.
+            # The bot is in the room but nobody's coming. Best to
+            # tell the caller so they can retry / mark failed.
+            logger.error(f"[{request_id}] dialOut failed: {exc}")
+            return _error_response(
+                503,
+                f"Daily dialOut failed: {exc}",
+            )
+
+        logger.info(
+            f"[{request_id}] dial-out complete; pipeline session={session_id}"
+        )
+        return _success_response(
+            200,
+            {
+                "session_id": session_id,
+                "room_url": room_url,
+                "dial_out": dial_response,
+                "status": "started",
+            },
+        )
+
+    except ValueError as e:
+        logger.error(f"[{request_id}] dial-out validation error: {e}")
+        return _error_response(400, str(e))
+    except Exception as e:
+        logger.exception(f"[{request_id}] dial-out unexpected error: {e}")
         return _error_response(500, "Internal server error")
 
 

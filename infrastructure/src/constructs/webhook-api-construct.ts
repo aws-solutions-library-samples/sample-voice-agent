@@ -61,18 +61,23 @@ export class WebhookApiConstruct extends Construct {
       throw new Error(`${id}: lambdaSecurityGroup is required in props`);
     }
 
-    // Lambda function for Daily webhooks
+    // Lambda function for Daily webhooks + outbound dialing.
     // Uses Python handler from src/functions/bot-runner/
+    //
+    // entrypoint = handler.route — dispatches to start_session
+    // (inbound webhook, /start) or start_dial_out (outbound,
+    // /dial-out, Phase 7D). Single Lambda function so both flows
+    // share the same DailyClient + ECS service client + IAM.
     this.botRunnerFunction = new lambda.Function(this, 'BotRunnerFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.start_session',
+      handler: 'handler.route',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'functions', 'bot-runner')),
       vpc: props.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [props.lambdaSecurityGroup],
       timeout: Duration.seconds(30),
       memorySize: 256,
-      description: `Handles Daily dial-in webhooks and calls ECS service - ${props.environment}`,
+      description: `Handles Daily inbound webhooks + outbound dial-out - ${props.environment}`,
       environment: {
         ECS_SERVICE_ENDPOINT: props.ecsServiceEndpoint,
         DAILY_API_KEY_SECRET_ARN: props.apiKeySecretArn,
@@ -166,9 +171,19 @@ export class WebhookApiConstruct extends Construct {
       },
     });
 
-    // POST /start endpoint
+    // POST /start — Daily inbound webhook (HMAC-verified)
     const startResource = this.api.root.addResource('start');
     startResource.addMethod('POST', new apigateway.LambdaIntegration(this.botRunnerFunction));
+
+    // POST /dial-out — Phase 7D outbound dialing trigger.
+    // No HMAC: this path is meant for same-account callers with
+    // lambda:Invoke permission (SQS consumer, operator scripts).
+    // API Gateway integration is provided so curl-based smoke tests
+    // and the frontend's "Test outbound" button can exercise it
+    // without needing an SDK. In production the SQS consumer should
+    // prefer direct lambda:Invoke (no API Gateway hop, IAM auth).
+    const dialOutResource = this.api.root.addResource('dial-out');
+    dialOutResource.addMethod('POST', new apigateway.LambdaIntegration(this.botRunnerFunction));
 
     this.apiEndpoint = `${this.api.url}start`;
 
@@ -177,6 +192,14 @@ export class WebhookApiConstruct extends Construct {
       parameterName: SSM_PARAMS.WEBHOOK_URL,
       stringValue: this.apiEndpoint,
       description: 'Voice Agent Daily Webhook URL',
+    });
+
+    // Phase 7D: dial-out endpoint URL → SSM so the SQS consumer can
+    // discover it without hardcoding.
+    new ssm.StringParameter(this, 'DialOutUrlParam', {
+      parameterName: '/voice-agent/botrunner/dial-out-url',
+      stringValue: `${this.api.url}dial-out`,
+      description: 'Voice Agent outbound dialing endpoint',
     });
   }
 }

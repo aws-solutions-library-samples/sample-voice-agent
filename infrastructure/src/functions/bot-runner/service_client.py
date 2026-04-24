@@ -73,6 +73,7 @@ class EcsServiceClient:
         system_prompt: Optional[str] = None,
         dialin_settings: Optional[dict] = None,
         agent_id: Optional[str] = None,
+        case_data: Optional[dict] = None,
     ) -> dict:
         """
         Start a voice call by sending request to the ECS service.
@@ -82,12 +83,19 @@ class EcsServiceClient:
             room_token: Bot meeting token
             session_id: Unique session identifier
             system_prompt: Optional custom system prompt
-            dialin_settings: Optional dial-in configuration
+            dialin_settings: Optional dial-in configuration. Pass None
+                for outbound calls (Phase 7D) — the pipeline runs
+                identically but joins a room that's been pre-bridged
+                via Daily's dialOut, not waiting for an inbound SIP.
             agent_id: Optional agent UUID or name. When set, the Fargate
                 pipeline's Phase 7A runtime-config loader pulls that
                 agent's full config from the voice-api Lambda. Omitted
                 for SIP / legacy callers that still provide a raw
                 ``system_prompt``.
+            case_data: Optional placeholder dict for the hydrator (Phase
+                7A). Outbound batch calls fill this from the batch row's
+                case_data column so {{Service_Date}} / {{Patient_Name}}
+                etc render against real values before reaching Bedrock.
 
         Returns:
             Response from the service
@@ -108,6 +116,9 @@ class EcsServiceClient:
 
         if dialin_settings:
             payload["dialin_settings"] = dialin_settings  # type: ignore
+
+        if case_data:
+            payload["case_data"] = case_data  # type: ignore
 
         logger.info(f"Sending call request to service: session_id={session_id}")
 

@@ -658,6 +658,11 @@ async def handle_call(request: web.Request) -> web.Response:
                 status=400,
             )
 
+        # case_data is the per-call placeholder dict the hydrator
+        # consumes (see app/hydrator.py). Inbound calls pass {} or
+        # omit it; outbound calls (Phase 7D) pass the batch row's
+        # case_data so {{Service_Date}}, {{Patient_First_Name}} etc.
+        # render against real values before reaching Bedrock.
         result = await pipeline_manager.start_call(
             room_url=room_url,
             room_token=room_token,
@@ -665,6 +670,7 @@ async def handle_call(request: web.Request) -> web.Response:
             system_prompt=data.get("system_prompt"),
             dialin_settings=data.get("dialin_settings"),
             agent_id=data.get("agent_id"),
+            case_data=data.get("case_data"),
         )
 
         status_code = result.pop(
