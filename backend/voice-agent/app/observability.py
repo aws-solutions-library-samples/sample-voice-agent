@@ -43,12 +43,19 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    MetricsFrame,
     TextFrame,
     TranscriptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+)
+from pipecat.metrics.metrics import (
+    LLMUsageMetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
@@ -146,6 +153,93 @@ class MetricsObserver(BaseObserver):
                 self._collector.end_turn()
                 self._turn_active = False
                 logger.debug("metrics_observer_turn_ended")
+
+        # Pipecat 0.0.108 services emit MetricsFrame via
+        # FrameProcessorMetrics (pipecat/processors/metrics/
+        # frame_processor_metrics.py). Each frame carries one or more
+        # MetricsData items with a `processor` tag identifying the
+        # source (e.g. "AWSBedrockLLMService#0"). Route TTFB /
+        # Processing / Usage data into the matching collector
+        # recorders so turn_completed reports non-null values.
+        #
+        # Without this branch, agent_response_latency_ms worked but
+        # stt_latency_ms / llm_ttfb_ms / tts_ttfb_ms / llm_input_tokens
+        # / llm_output_tokens all came back None (observed 2026-04-24).
+        elif isinstance(frame, MetricsFrame):
+            if not _is_new_frame(self._seen, data):
+                return
+            self._handle_metrics_frame(frame)
+
+    def _handle_metrics_frame(self, frame: MetricsFrame) -> None:
+        """Route MetricsData items to the right collector recorder.
+
+        Processor names in pipecat are formatted like
+        ``"AWSBedrockLLMService#0"`` — class name + deterministic
+        instance number. Match on the class-name prefix so future
+        renumbering (multiple service instances) doesn't break
+        routing.
+        """
+        for item in frame.data:
+            proc = (item.processor or "").lower()
+            value_ms: Optional[float] = None
+
+            if isinstance(item, TTFBMetricsData):
+                # value is in seconds, convert to ms
+                value_ms = item.value * 1000.0
+
+                # LLM TTFB — Bedrock / Anthropic / OpenAI / Azure …
+                if "llm" in proc or "bedrock" in proc or "claude" in proc:
+                    self._collector.record_llm_ttfb(value_ms)
+                    logger.debug(
+                        "metrics_observer_llm_ttfb",
+                        processor=item.processor,
+                        value_ms=round(value_ms, 1),
+                    )
+                # TTS TTFB — ElevenLabs / Cartesia / OpenAI TTS
+                elif "tts" in proc or "elevenlabs" in proc or "cartesia" in proc:
+                    self._collector.record_tts_ttfb(value_ms)
+                    logger.debug(
+                        "metrics_observer_tts_ttfb",
+                        processor=item.processor,
+                        value_ms=round(value_ms, 1),
+                    )
+
+            elif isinstance(item, ProcessingMetricsData):
+                value_ms = item.value * 1000.0
+                # STT processing time maps to our stt_latency metric
+                if "stt" in proc or "deepgram" in proc or "whisper" in proc:
+                    self._collector.record_stt_latency(value_ms)
+                    logger.debug(
+                        "metrics_observer_stt_latency",
+                        processor=item.processor,
+                        value_ms=round(value_ms, 1),
+                    )
+                # LLM total processing time
+                elif "llm" in proc or "bedrock" in proc or "claude" in proc:
+                    self._collector.record_llm_total(value_ms)
+
+            elif isinstance(item, LLMUsageMetricsData):
+                # LLMUsageMetricsData.value is a LLMTokenUsage object.
+                usage = item.value
+                self._collector.record_llm_usage(
+                    input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                    output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                )
+                logger.debug(
+                    "metrics_observer_llm_usage",
+                    processor=item.processor,
+                    input_tokens=getattr(usage, "prompt_tokens", 0),
+                    output_tokens=getattr(usage, "completion_tokens", 0),
+                )
+
+            elif isinstance(item, TTSUsageMetricsData):
+                # Character count; we don't currently track but log
+                # for visibility into TTS cost.
+                logger.debug(
+                    "metrics_observer_tts_usage",
+                    processor=item.processor,
+                    characters=item.value,
+                )
 
 
 class ConversationObserver(BaseObserver):
@@ -1794,6 +1888,25 @@ class MetricsCollector:
         if self._current_turn:
             self._current_turn.llm_output_tokens = output_tokens
             self._current_turn.llm_tokens_per_second = tokens_per_second
+
+    def record_llm_usage(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        """Record LLM token usage for current turn.
+
+        Called by MetricsObserver when a LLMUsageMetricsData frame is
+        seen. Separate from record_llm_quality because usage info
+        arrives AFTER generation completes (tokens_per_second isn't
+        computable until then), while record_llm_quality is invoked
+        by code paths that already know TPS.
+        """
+        if self._current_turn:
+            if input_tokens:
+                self._current_turn.llm_input_tokens = input_tokens
+            if output_tokens:
+                self._current_turn.llm_output_tokens = output_tokens
 
     def record_webrtc_quality(
         self,
