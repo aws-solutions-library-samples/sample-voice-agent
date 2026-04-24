@@ -372,6 +372,23 @@ export class EcsStack extends cdk.Stack {
       })
     );
 
+    // Phase 7A: allow the task to invoke the voice-api Lambda (and its
+    // `live` alias) for runtime-config fetches. Paired with the
+    // VOICE_API_LAMBDA_NAME env var above. Account-scoped (we only ever
+    // call our own medcloud-voice-api; no need to open this to other
+    // functions).
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'InvokeVoiceApiLambda',
+        effect: iam.Effect.ALLOW,
+        actions: ['lambda:InvokeFunction'],
+        resources: [
+          `arn:aws:lambda:${this.region}:${this.account}:function:medcloud-voice-api`,
+          `arn:aws:lambda:${this.region}:${this.account}:function:medcloud-voice-api:*`,
+        ],
+      })
+    );
+
     // =====================
     // CloudWatch Log Group
     // =====================
@@ -432,6 +449,12 @@ export class EcsStack extends cdk.Stack {
         A2A_NAMESPACE: this.capabilityNamespace.namespaceName,
         // Auto-scaling: max concurrent calls per container
         MAX_CONCURRENT_CALLS: String(config.sessionCapacityPerTask),
+        // Phase 7A: runtime agent-config loader target. When set, the
+        // pipeline's agent_config loader uses `aws lambda invoke` against
+        // this function (IAM-native, no API key) instead of hitting the
+        // API Gateway. Alias-qualified so deploys flip atomically and
+        // rollbacks flip back via the live alias.
+        VOICE_API_LAMBDA_NAME: 'medcloud-voice-api:live',
       },
       healthCheck: {
         command: ['CMD-SHELL', 'curl -f http://localhost:8080/health || exit 1'],

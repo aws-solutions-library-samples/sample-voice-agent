@@ -29,6 +29,7 @@ from app.services.agent_config import (
     load_agent_config,
     resolve_bedrock_model_id,
     _SHORT_TO_BEDROCK,
+    _load_via_lambda_invoke,
 )
 
 
@@ -280,6 +281,192 @@ class TestLoadAgentConfig:
         # No double-slash in the path
         assert "//api/agents" not in session.calls[0][0]
         assert session.calls[0][0] == "http://example.test/api/agents/chris-claim-status/runtime-config"
+
+
+# ── Lambda-invoke transport tests ──────────────────────────────────────────
+
+
+class _FakeStreamingBody:
+    """Mimics aioboto3's StreamingBody — .read() is async and returns bytes."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+
+    async def read(self):
+        return self._data
+
+
+def _fake_lambda_response(status_code: int, body: dict | str, function_error: str | None = None):
+    """Build the dict shape aioboto3's lambda.invoke() returns."""
+    outer = {
+        "statusCode": status_code,
+        "body": body if isinstance(body, str) else json.dumps(body),
+        "headers": {"Content-Type": "application/json"},
+    }
+    resp = {
+        "StatusCode": 200,
+        "Payload": _FakeStreamingBody(json.dumps(outer).encode("utf-8")),
+    }
+    if function_error:
+        resp["FunctionError"] = function_error
+    return resp
+
+
+class _FakeLambdaClient:
+    """AsyncMock stand-in for aioboto3's async Lambda client."""
+
+    def __init__(self, response: dict, side_effect: Exception | None = None):
+        self.response = response
+        self.side_effect = side_effect
+        self.calls: list[dict] = []
+
+    async def invoke(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.side_effect:
+            raise self.side_effect
+        return self.response
+
+
+@pytest.mark.asyncio
+class TestLoadViaLambdaInvoke:
+    async def test_happy_path_returns_parsed_body(self):
+        client = _FakeLambdaClient(
+            response=_fake_lambda_response(200, _runtime_config_shape())
+        )
+        raw = await _load_via_lambda_invoke(
+            "chris-claim-status",
+            "medcloud-voice-api:live",
+            lambda_client=client,
+        )
+        assert raw["name"] == "chris-claim-status"
+        # Verify the Lambda was called with the right path in the event payload
+        assert len(client.calls) == 1
+        event = json.loads(client.calls[0]["Payload"])
+        assert event["path"] == "/api/agents/chris-claim-status/runtime-config"
+        assert event["httpMethod"] == "GET"
+
+    async def test_uuid_passes_through_in_event_path(self):
+        client = _FakeLambdaClient(
+            response=_fake_lambda_response(200, _runtime_config_shape())
+        )
+        uuid = "576b22a4-42ad-4ac1-8a2b-7067fb5c5cd4"
+        await _load_via_lambda_invoke(
+            uuid, "medcloud-voice-api:live", lambda_client=client
+        )
+        event = json.loads(client.calls[0]["Payload"])
+        assert f"/api/agents/{uuid}/runtime-config" in event["path"]
+
+    async def test_404_raises_lookup_error(self):
+        client = _FakeLambdaClient(
+            response=_fake_lambda_response(404, {"detail": "Agent not found"})
+        )
+        with pytest.raises(LookupError):
+            await _load_via_lambda_invoke(
+                "ghost-agent",
+                "medcloud-voice-api:live",
+                lambda_client=client,
+            )
+
+    async def test_500_raises_runtime_error(self):
+        client = _FakeLambdaClient(
+            response=_fake_lambda_response(500, "server error")
+        )
+        with pytest.raises(RuntimeError):
+            await _load_via_lambda_invoke(
+                "chris-claim-status",
+                "medcloud-voice-api:live",
+                lambda_client=client,
+            )
+
+    async def test_function_error_raises(self):
+        """Unhandled Lambda exception is distinct from a 4xx/5xx body."""
+        client = _FakeLambdaClient(
+            response={
+                "StatusCode": 200,
+                "FunctionError": "Unhandled",
+                "Payload": _FakeStreamingBody(
+                    json.dumps({"errorMessage": "boom", "errorType": "TypeError"}).encode()
+                ),
+            }
+        )
+        with pytest.raises(RuntimeError, match="FunctionError"):
+            await _load_via_lambda_invoke(
+                "chris-claim-status",
+                "medcloud-voice-api:live",
+                lambda_client=client,
+            )
+
+    async def test_boto3_client_error_propagates(self):
+        client = _FakeLambdaClient(
+            response={},
+            side_effect=Exception("AccessDeniedException"),
+        )
+        with pytest.raises(Exception, match="AccessDeniedException"):
+            await _load_via_lambda_invoke(
+                "chris-claim-status",
+                "medcloud-voice-api:live",
+                lambda_client=client,
+            )
+
+
+@pytest.mark.asyncio
+class TestLoadAgentConfigRouting:
+    """Covers the lambda-vs-http transport selection in load_agent_config."""
+
+    async def test_lambda_path_chosen_when_lambda_name_provided(self):
+        client = _FakeLambdaClient(
+            response=_fake_lambda_response(200, _runtime_config_shape())
+        )
+        cfg = await load_agent_config(
+            "chris-claim-status",
+            lambda_name="medcloud-voice-api:live",
+            lambda_client=client,
+        )
+        assert cfg.name == "chris-claim-status"
+        # Confirms the Lambda transport was used (client got called)
+        assert len(client.calls) == 1
+
+    async def test_lambda_path_404_returns_fallback(self):
+        client = _FakeLambdaClient(
+            response=_fake_lambda_response(404, {"detail": "Agent not found"})
+        )
+        cfg = await load_agent_config(
+            "ghost-agent",
+            lambda_name="medcloud-voice-api:live",
+            lambda_client=client,
+        )
+        assert cfg.meta.agent_id == ""  # fallback sentinel
+        assert cfg.name == "ghost-agent"
+
+    async def test_lambda_path_parse_error_returns_fallback(self):
+        client = _FakeLambdaClient(
+            response=_fake_lambda_response(
+                200, {"llm": "not an object"}  # invalid shape
+            )
+        )
+        cfg = await load_agent_config(
+            "chris-claim-status",
+            lambda_name="medcloud-voice-api:live",
+            lambda_client=client,
+        )
+        assert cfg.meta.agent_id == ""
+
+    async def test_http_path_chosen_when_no_lambda_name(self, monkeypatch):
+        """Empty lambda_name + no VOICE_API_LAMBDA_NAME env → HTTP path."""
+        monkeypatch.delenv("VOICE_API_LAMBDA_NAME", raising=False)
+        session = _FakeSession(
+            response=_FakeResponse(status=200, body=_runtime_config_shape())
+        )
+        cfg = await load_agent_config(
+            "chris-claim-status",
+            base_url="http://example.test",
+            api_key="test-key",
+            lambda_name="",  # explicitly empty — no Lambda
+            session=session,
+        )
+        assert cfg.name == "chris-claim-status"
+        # Confirms HTTP path was used
+        assert len(session.calls) == 1
 
 
 # ── resolve_bedrock_model_id tests ─────────────────────────────────────────

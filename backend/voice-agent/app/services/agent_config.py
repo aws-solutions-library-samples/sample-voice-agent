@@ -29,6 +29,8 @@ caller must finish, even badly, not hang up.
 
 from __future__ import annotations
 
+import base64
+import json as _json
 import os
 import time
 from typing import Any, Optional
@@ -155,10 +157,10 @@ class AgentConfigLoadError(Exception):
 
 def _default_base_url() -> str:
     """
-    Where to fetch runtime configs from. In prod ECS this is the API Gateway
-    URL in front of the Lambda. For local dev / tests callers override via
-    the base_url kwarg. Env var takes precedence over the hardcoded prod URL
-    so a misconfigured dev environment can't accidentally hit prod.
+    Where to fetch runtime configs from when using the HTTP path (no
+    VOICE_API_LAMBDA_NAME). In prod ECS we default to the Lambda-invoke
+    path because same-account direct invoke is IAM-native and needs no
+    API key; HTTP is a fallback for non-AWS callers / local dev.
     """
     return os.environ.get(
         "VOICE_API_BASE_URL",
@@ -168,11 +170,105 @@ def _default_base_url() -> str:
 
 def _default_api_key() -> str:
     """
-    X-API-Key for the Lambda. The Lambda's API Gateway is wired to require
-    this header. Stored in Secrets Manager and loaded into the ECS task's
-    env at startup (see service_main.py secrets_loader).
+    X-API-Key for the Lambda (HTTP path only). Lambda-invoke path uses
+    IAM and needs no API key. Prefer setting VOICE_API_LAMBDA_NAME in
+    ECS so we skip API Gateway entirely.
     """
     return os.environ.get("COSENTUS_API_KEY", "")
+
+
+def _default_lambda_name() -> str:
+    """
+    AWS Lambda function name to invoke for runtime-config.
+    When set, `load_agent_config` prefers direct boto3 invoke over HTTP.
+    In our ECS task def this is set to `medcloud-voice-api:live` so the
+    call follows the alias.
+    """
+    return os.environ.get("VOICE_API_LAMBDA_NAME", "")
+
+
+async def _load_via_lambda_invoke(
+    agent_id_or_name: str,
+    function_name: str,
+    *,
+    lambda_client: Any = None,
+) -> dict[str, Any]:
+    """
+    Invoke the voice-api Lambda directly via boto3 (async via aioboto3).
+
+    Same-account, IAM-native auth — no API key, no API Gateway. The
+    caller should set VOICE_API_LAMBDA_NAME so this path is taken in
+    preference to the HTTP path.
+
+    The ECS task role needs `lambda:InvokeFunction` on the Lambda's
+    ARN (or the alias) — declared in CDK ecs-stack.ts.
+
+    Returns the parsed JSON body of the Lambda's response, or raises.
+    Callers should treat a raise as "fetch failed, use fallback".
+
+    Args:
+        agent_id_or_name: UUID or name — goes verbatim into the path.
+        function_name: Lambda function name or alias (e.g. 'medcloud-voice-api:live').
+        lambda_client: optional injected aioboto3 client for tests. If
+            None, a fresh aioboto3 session is created per call.
+    """
+    event_payload = {
+        "httpMethod": "GET",
+        "path": f"/api/agents/{agent_id_or_name}/runtime-config",
+        "headers": {},
+        "queryStringParameters": None,
+        "body": None,
+    }
+    payload_bytes = _json.dumps(event_payload).encode("utf-8")
+
+    if lambda_client is not None:
+        # Test-injected client (tests pass an AsyncMock). Must expose
+        # .invoke() → dict with 'Payload' key (async iterable of bytes
+        # or a .read() coroutine, same as real aioboto3 client).
+        resp = await lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="RequestResponse",
+            Payload=payload_bytes,
+        )
+    else:
+        # Lazy import so tests that don't use this path don't require
+        # aioboto3 to be installed. aioboto3 IS in requirements.txt
+        # (ships with the fork's sagemaker extra) so it's present in
+        # production Docker image.
+        import aioboto3  # noqa: WPS433 — deliberate lazy import
+
+        session = aioboto3.Session()
+        async with session.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1")) as client:
+            resp = await client.invoke(
+                FunctionName=function_name,
+                InvocationType="RequestResponse",
+                Payload=payload_bytes,
+            )
+
+    # Both real aioboto3 + typical mock stubs return a response dict
+    # whose 'Payload' is a StreamingBody (async .read() → bytes). Some
+    # mocks put raw bytes directly on Payload; handle both.
+    raw = resp["Payload"]
+    if hasattr(raw, "read"):
+        raw = await raw.read()
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8")
+    outer = _json.loads(raw)
+
+    if resp.get("FunctionError"):
+        raise RuntimeError(
+            f"Lambda returned FunctionError: {outer.get('errorMessage', outer)}"
+        )
+
+    # Lambda's Proxy-Integration response shape: {statusCode, body (str), headers}
+    # The body is JSON string. Callers above treat non-200 as failure.
+    status = outer.get("statusCode", 500)
+    body_str = outer.get("body", "") or ""
+    if status == 404:
+        raise LookupError(f"Agent not found: {agent_id_or_name}")
+    if status >= 400:
+        raise RuntimeError(f"Lambda returned HTTP {status}: {body_str[:200]}")
+    return _json.loads(body_str) if body_str else {}
 
 
 async def load_agent_config(
@@ -180,11 +276,20 @@ async def load_agent_config(
     *,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    lambda_name: Optional[str] = None,
     timeout_sec: float = 5.0,
     session: Optional[aiohttp.ClientSession] = None,
+    lambda_client: Any = None,
 ) -> AgentConfig:
     """
     Fetch one agent's runtime config from the voice-api Lambda.
+
+    Transport selection (in order of preference):
+      1. If `lambda_name` or env VOICE_API_LAMBDA_NAME is set, invoke the
+         Lambda directly via boto3 — IAM-native, no API key required.
+         This is the prod path.
+      2. Otherwise fall back to HTTP via the API Gateway. Requires an
+         X-API-Key. Useful for local dev / non-AWS callers / cross-account.
 
     Returns AgentConfig.fallback() if the load fails — no exceptions propagate
     to the caller. The brief requires we never drop a call due to a config
@@ -196,19 +301,81 @@ async def load_agent_config(
 
     Args:
         agent_id_or_name: agent UUID or name, passed verbatim as `:id`.
-        base_url: optional override for the voice-api URL. Defaults to
-            VOICE_API_BASE_URL env var or prod.
-        api_key: optional X-API-Key override. Defaults to COSENTUS_API_KEY env var.
+        base_url: HTTP path only — override voice-api URL.
+        api_key: HTTP path only — override X-API-Key.
+        lambda_name: Lambda path only — override function name.
         timeout_sec: HTTP timeout. 5s generously accommodates cold Lambda.
-        session: optional aiohttp.ClientSession for testing. If None, a
-            fresh session is created per call — fine for once-per-call use.
+        session: HTTP path only — inject aiohttp.ClientSession for tests.
+        lambda_client: Lambda path only — inject aioboto3 client for tests.
     """
+    resolved_lambda = lambda_name if lambda_name is not None else _default_lambda_name()
+    started = time.perf_counter()
+
+    # Lambda-invoke path (preferred in-AWS transport)
+    if resolved_lambda:
+        try:
+            raw = await _load_via_lambda_invoke(
+                agent_id_or_name,
+                resolved_lambda,
+                lambda_client=lambda_client,
+            )
+        except LookupError as exc:
+            logger.error(
+                "agent_config_load_failed",
+                reason="not_found",
+                transport="lambda_invoke",
+                agent_id_or_name=agent_id_or_name,
+                function_name=resolved_lambda,
+                error=str(exc),
+                load_time_ms=(time.perf_counter() - started) * 1000,
+            )
+            return AgentConfig.fallback(agent_name=agent_id_or_name)
+        except Exception as exc:  # noqa: BLE001 — any failure → fallback
+            logger.error(
+                "agent_config_load_failed",
+                reason="lambda_invoke_error",
+                transport="lambda_invoke",
+                agent_id_or_name=agent_id_or_name,
+                function_name=resolved_lambda,
+                error=str(exc),
+                error_type=type(exc).__name__,
+                load_time_ms=(time.perf_counter() - started) * 1000,
+            )
+            return AgentConfig.fallback(agent_name=agent_id_or_name)
+
+        try:
+            config = AgentConfig.model_validate(raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "agent_config_load_failed",
+                reason="parse_error",
+                transport="lambda_invoke",
+                agent_id_or_name=agent_id_or_name,
+                error=str(exc),
+                load_time_ms=(time.perf_counter() - started) * 1000,
+            )
+            return AgentConfig.fallback(agent_name=agent_id_or_name)
+
+        load_time_ms = (time.perf_counter() - started) * 1000
+        logger.info(
+            "agent_config_loaded",
+            transport="lambda_invoke",
+            agent_id=config.meta.agent_id or config.name,
+            agent_name=config.name,
+            version=config.meta.version,
+            tools_count=len(config.tools),
+            llm_model=config.llm.model,
+            tts_voice_id=config.tts.voice_id,
+            load_time_ms=load_time_ms,
+        )
+        return config
+
+    # HTTP fallback path
     resolved_url = (base_url or _default_base_url()).rstrip("/")
     resolved_key = api_key if api_key is not None else _default_api_key()
     url = f"{resolved_url}/api/agents/{agent_id_or_name}/runtime-config"
     headers = {"X-API-Key": resolved_key} if resolved_key else {}
 
-    started = time.perf_counter()
     owned_session = session is None
     http = session or aiohttp.ClientSession()
     try:
@@ -221,6 +388,7 @@ async def load_agent_config(
                 logger.error(
                     "agent_config_load_failed",
                     reason="not_found",
+                    transport="http",
                     agent_id_or_name=agent_id_or_name,
                     status=404,
                     load_time_ms=(time.perf_counter() - started) * 1000,
@@ -232,6 +400,7 @@ async def load_agent_config(
                 logger.error(
                     "agent_config_load_failed",
                     reason="http_error",
+                    transport="http",
                     agent_id_or_name=agent_id_or_name,
                     status=resp.status,
                     body_preview=body_preview,
@@ -247,6 +416,7 @@ async def load_agent_config(
                 logger.error(
                     "agent_config_load_failed",
                     reason="parse_error",
+                    transport="http",
                     agent_id_or_name=agent_id_or_name,
                     error=str(exc),
                     load_time_ms=(time.perf_counter() - started) * 1000,
@@ -256,6 +426,7 @@ async def load_agent_config(
             load_time_ms = (time.perf_counter() - started) * 1000
             logger.info(
                 "agent_config_loaded",
+                transport="http",
                 agent_id=config.meta.agent_id or config.name,
                 agent_name=config.name,
                 version=config.meta.version,
@@ -270,6 +441,7 @@ async def load_agent_config(
         logger.error(
             "agent_config_load_failed",
             reason="client_error",
+            transport="http",
             agent_id_or_name=agent_id_or_name,
             error=str(exc),
             error_type=type(exc).__name__,
@@ -280,6 +452,7 @@ async def load_agent_config(
         logger.error(
             "agent_config_load_failed",
             reason="timeout",
+            transport="http",
             agent_id_or_name=agent_id_or_name,
             timeout_sec=timeout_sec,
             load_time_ms=(time.perf_counter() - started) * 1000,
