@@ -455,6 +455,19 @@ async def create_voice_pipeline(
         ),
     ]
 
+    # Phase 7A: when the agent has a first_message configured, pre-bake it
+    # into the context as an assistant turn. This matches the OG voice-
+    # engine pattern (voiceagent/core/pipeline.py:433) — TTS speaks the
+    # message directly on call start, no LLM round-trip needed. Reliable
+    # + faster (saves ~600-1000ms of first-turn LLM latency) + gives us
+    # verbatim control over the opening line.
+    #
+    # When first_message is empty, on_first_participant_joined prompts the
+    # LLM with a "greet them warmly" stub so the bot still says SOMETHING
+    # on call start.
+    if config.first_message:
+        messages.append({"role": "assistant", "content": config.first_message})
+
     # Pass tools to context so LLM knows what tools are available.
     # ToolsSchema wraps FunctionSchema objects for provider-agnostic tool
     # definitions. Pipecat's Bedrock adapter converts these to the native
@@ -590,27 +603,23 @@ async def create_voice_pipeline(
             session_id=config.session_id,
             participant_id=participant.get("id"),
         )
-        # Trigger initial greeting by sending context with a user message
-        # Bedrock's Converse API requires conversations to start with a user
-        # message, so we synthesize one. The user-message content steers the
-        # greeting: when the agent has a first_message configured, we tell
-        # the LLM to use that verbatim; otherwise the LLM picks a greeting.
-        if config.first_message:
-            user_turn_content = (
-                "[The user has just joined the call. "
-                f"Start with this greeting verbatim: {config.first_message}]"
-            )
-        else:
-            user_turn_content = "[The user has just joined the call. Greet them warmly.]"
 
+        # If first_message was configured, it's already in the context as a
+        # pre-baked assistant turn (see messages construction above) and
+        # Pipecat's context processor will feed it straight to TTS on call
+        # start. Nothing more to do here.
+        if config.first_message:
+            return
+
+        # No first_message configured: we need SOMETHING to make the bot
+        # speak first. Send an LLM-prompt-style user turn so the model
+        # generates an appropriate opener. Bedrock Converse API requires
+        # conversations to start with a user message, so we synthesize one.
         greeting_messages = [
-            {
-                "role": "system",
-                "content": config.system_prompt,
-            },
+            {"role": "system", "content": config.system_prompt},
             {
                 "role": "user",
-                "content": user_turn_content,
+                "content": "[The user has just joined the call. Greet them warmly.]",
             },
         ]
         await task.queue_frames(
