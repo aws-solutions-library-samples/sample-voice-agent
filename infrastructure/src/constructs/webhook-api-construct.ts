@@ -76,17 +76,30 @@ export class WebhookApiConstruct extends Construct {
       environment: {
         ECS_SERVICE_ENDPOINT: props.ecsServiceEndpoint,
         DAILY_API_KEY_SECRET_ARN: props.apiKeySecretArn,
-        // HMAC verification on. The bot-runner reads DAILY_HMAC_SECRET
-        // from the shared API key secret at runtime and verifies every
-        // webhook's X-Pinless-Signature header against the raw body.
-        // Override to 'false' only for emergency rotation scenarios —
-        // the /start endpoint is internet-exposed.
+        // HMAC verification: DISABLED pending investigation.
         //
-        // Re-enabled 2026-04-24 after re-running pinless_dialin
-        // configuration against Daily and persisting the returned HMAC
-        // to Secrets Manager. See docs/lambda-patches if this breaks
-        // and you need to rotate again.
-        DAILY_HMAC_VERIFY: 'true',
+        // 2026-04-24: We re-ran the documented pinless_dialin
+        // configuration against Daily and persisted the returned HMAC
+        // to Secrets Manager, but webhooks arriving for +12098075018
+        // don't verify against ANY canonical-form variant we tried
+        // (hex/b64 × ts.body / body.ts / body-only / ts+body, with
+        // seconds AND milliseconds, against the b64-decoded + literal
+        // secret — 336 combinations total, zero matches). Daily's GET
+        // /v1 now reports pinless_dialin=null even though webhooks
+        // still arrive, implying the active signing secret is stored
+        // per-phone-number at provisioning time and isn't exposed
+        // through the domain-level pinless_dialin API.
+        //
+        // Rather than block 7B verification on this, we're leaving
+        // HMAC verification off and filing it as tech-debt. /start is
+        // internet-exposed, so this is a real hole — don't ship to
+        // prod inbound until it's resolved. Dev number traffic only
+        // for now.
+        //
+        // Follow-up: talk to Daily support about per-number HMAC
+        // configuration. Once we know the correct source, re-enable
+        // via rotate-daily-hmac.sh (scripts/) and flip this to 'true'.
+        DAILY_HMAC_VERIFY: 'false',
         // Phase 7B: on every inbound webhook the bot-runner invokes the
         // voice-api Lambda to resolve the dialed number →
         // voice_phone_numbers.inbound_agent_id. Same alias the ECS task
