@@ -371,7 +371,7 @@ async def create_voice_pipeline(
     tools_list: List[Any] = []
 
     # Deferred reference to PipelineTask for tool-initiated frame queuing.
-    # Tools (e.g., hangup_call) need to push EndFrame into the pipeline,
+    # Tools (e.g., end_call) need to push EndFrame into the pipeline,
     # but _register_tools() runs before the PipelineTask is created.
     # This mutable container is captured by the closure and populated later.
     task_ref: Dict[str, Optional[PipelineTask]] = {"task": None}
@@ -410,6 +410,7 @@ async def create_voice_pipeline(
             sip_session_tracker,
             available_capabilities,
             queue_frame=_queue_frame_for_tools,
+            tools_config=config.tools_config,
         )
         logger.info(
             "tool_calling_enabled",
@@ -664,15 +665,27 @@ def _register_tools(
     sip_session_tracker: Optional[Dict[str, Optional[str]]] = None,
     available_capabilities: Optional[Any] = None,
     queue_frame: Optional[Any] = None,
+    tools_config: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Any]:
     """
     Register local tools with the LLM service for function calling.
 
-    Uses the capability-based tool catalog: each tool declares the pipeline
-    capabilities it requires (e.g., TRANSPORT, SIP_SESSION, TRANSFER_DESTINATION),
-    and only tools whose requirements are satisfied by the detected capabilities
-    get registered. This prevents the LLM from seeing tools that can't function
-    in the current deployment.
+    Uses the capability-based tool catalog + the agent's Aurora tools
+    config:
+
+      * For tools whose names appear in Aurora's VALID_TOOL_TYPES
+        (currently: end_call, press_digit, transfer_call), register
+        ONLY if the agent has that tool in ``tools_config``. Use the
+        Aurora-supplied description (agent designer can tune the LLM
+        prompt per-agent) and pass settings through via ToolContext.
+
+      * For internal tools (get_current_time), register unconditionally
+        subject to capability gating. These aren't exposed in the
+        agent-config UI and are always available to every agent.
+
+    Capability gating runs in addition — even a tools_config-listed
+    tool is skipped if the pipeline lacks its required capabilities
+    (e.g., transfer_call without a SIP session).
 
     Args:
         llm: The Bedrock LLM service to register tools with
@@ -683,7 +696,12 @@ def _register_tools(
         available_capabilities: Frozenset of PipelineCapability values detected
             at pipeline creation time. If None, defaults to {BASIC} only.
         queue_frame: Optional async callback to queue frames into the pipeline.
-            Used by tools that need to push frames (e.g., EndFrame for hangup).
+            Used by tools that need to push frames (e.g., EndFrame for end_call).
+        tools_config: Agent's tool configuration from Aurora. Shape:
+            ``[{"type": "end_call", "description": "...", "settings": {}}]``.
+            Empty list / None → no Aurora-configurable tools register (only
+            the internal ones like get_current_time). See Lambda's
+            VALID_TOOL_TYPES for the canonical type list.
 
     Returns:
         List of tool definitions in Bedrock format for passing to LLM context
@@ -715,8 +733,32 @@ def _register_tools(
                     disabled_tools=sorted(disabled_tools),
                 )
 
-    # Filter the catalog: only register tools whose requirements are met
-    # and that haven't been explicitly disabled via config
+    # Build a map of Aurora-configured tools by name for O(1) lookup.
+    # Names that appear here (and ONLY these names among the Aurora-
+    # configurable set) will be registered. Aurora's `description`
+    # overrides the fork's hardcoded one so agent designers can
+    # per-agent-tune the LLM prompt.
+    aurora_tools_by_name: Dict[str, Dict[str, Any]] = {}
+    for entry in tools_config or []:
+        name = (entry or {}).get("type")
+        if isinstance(name, str) and name:
+            aurora_tools_by_name[name] = entry
+
+    # Names that Aurora's VALID_TOOL_TYPES knows about (see cosentus-
+    # voice-api-lambda/index.mjs). Keeping the list in sync is a manual
+    # process — flag for future automation via a shared schema fetch.
+    AURORA_CONFIGURABLE_TOOL_NAMES = frozenset({
+        "end_call",
+        "press_digit",
+        "transfer_call",
+    })
+
+    # Per-tool settings overrides (passed to executor via ToolContext).
+    tool_settings_by_name: Dict[str, Dict[str, Any]] = {}
+
+    # Filter the catalog: only register tools whose requirements are met,
+    # that aren't explicitly disabled, and (for Aurora-configurable
+    # types) that the agent has actually opted into.
     registry = ToolRegistry()
     skipped_tools = []
 
@@ -724,18 +766,44 @@ def _register_tools(
         # Check explicit disable list first
         if tool.name in disabled_tools:
             skipped_tools.append(
-                {
-                    "name": tool.name,
-                    "reason": "disabled_by_config",
-                }
+                {"name": tool.name, "reason": "disabled_by_config"}
             )
-            logger.info(
-                "tool_disabled_by_config",
-                tool_name=tool.name,
-            )
+            logger.info("tool_disabled_by_config", tool_name=tool.name)
             continue
 
-        # Check capability requirements
+        # Aurora gate: if this is an agent-configurable tool (end_call /
+        # press_digit / transfer_call), register only if it's in the
+        # agent's tools_config list. Internal tools (e.g., time_tool)
+        # pass straight through.
+        if tool.name in AURORA_CONFIGURABLE_TOOL_NAMES:
+            aurora_entry = aurora_tools_by_name.get(tool.name)
+            if not aurora_entry:
+                skipped_tools.append(
+                    {"name": tool.name, "reason": "not_in_agent_config"}
+                )
+                logger.info(
+                    "tool_skipped_not_in_agent_config",
+                    tool_name=tool.name,
+                )
+                continue
+
+            # Override the description with Aurora's per-agent copy so
+            # agent designers control the LLM-facing prompt. Fall back
+            # to the fork's hardcoded description when Aurora didn't
+            # supply one (defensive — the Lambda schema requires it
+            # on write but older rows might be blank).
+            aurora_description = (aurora_entry.get("description") or "").strip()
+            if aurora_description:
+                from dataclasses import replace
+
+                tool = replace(tool, description=aurora_description)
+
+            # Capture settings for executor access at call time.
+            aurora_settings = aurora_entry.get("settings") or {}
+            if isinstance(aurora_settings, dict):
+                tool_settings_by_name[tool.name] = aurora_settings
+
+        # Check capability requirements (always, regardless of config source).
         tool_requires = tool.requires or frozenset({PipelineCapability.BASIC})
         if tool_requires <= available_capabilities:
             registry.register(tool)
@@ -797,6 +865,11 @@ def _register_tools(
                 if sip_session_tracker
                 else None,
                 queue_frame=queue_frame,
+                # Per-tool settings from the agent's Aurora config —
+                # e.g. transfer_call's ``targets`` dict. Empty {} when
+                # the agent didn't provide any (built-in tools + tools
+                # with no configurable settings).
+                tool_settings=tool_settings_by_name.get(tool_name, {}),
             )
 
             logger.info(
@@ -815,7 +888,7 @@ def _register_tools(
 
             # Return result through Pipecat's callback
             # Build optional properties to control post-tool LLM behavior.
-            # Tools like hangup_call set run_llm=False to suppress the
+            # Tools like end_call set run_llm=False to suppress the
             # redundant LLM re-inference that would otherwise add ~2s of
             # dead air before the pipeline actually disconnects.
             properties = None

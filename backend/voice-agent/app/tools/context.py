@@ -79,6 +79,13 @@ class ToolContext:
     # None when no pipeline task is available (e.g., in unit tests).
     queue_frame: Optional[QueueFrameFunc] = None
 
+    # Per-tool settings from the agent's Aurora config.  Mirrors the
+    # ``settings`` object on voice_agents.tools[].settings so tool
+    # executors can read, e.g., the transfer targets dict, without
+    # having to close over the whole AgentConfig.  Empty dict when the
+    # agent didn't supply tool-specific config.
+    tool_settings: Dict[str, Any] = field(default_factory=dict)
+
     # Cancellation signal
     cancelled: bool = False
 

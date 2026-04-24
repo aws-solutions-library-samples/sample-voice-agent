@@ -33,7 +33,7 @@ class ToolResult:
         execution_time_ms: Actual execution time in milliseconds
         run_llm: Whether the LLM should re-infer after this result.
             None (default) uses Pipecat's default behavior. Set to False
-            for terminal tools like hangup_call that end the pipeline and
+            for terminal tools like end_call that end the pipeline and
             don't need a follow-up LLM response.
         spoken_response: Text to speak directly via TTS when run_llm=False.
             For deterministic tools where the response is known in advance,
