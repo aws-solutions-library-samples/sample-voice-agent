@@ -51,8 +51,15 @@ fi
 # Compute a deterministic tag from the content that affects the base image.
 # Include Dockerfile.base itself so base-image-only tweaks (e.g. bumping the
 # python version) force a rebuild even if requirements.txt is unchanged.
-HASH_INPUT=$(cat "$REQUIREMENTS_FILE" "$BASE_DOCKERFILE")
-REQ_HASH=$(printf '%s' "$HASH_INPUT" | shasum -a 256 | awk '{print substr($1, 1, 16)}')
+#
+# NOTE: pipe `cat ... | shasum` directly rather than going through
+# HASH_INPUT=$(cat ...) + printf '%s'. Command substitution in bash strips
+# trailing newlines from its output, while TypeScript's
+# `fs.readFileSync(...)` preserves them. If this shell hash diverges from
+# the TS hash in infrastructure/src/stacks/ecs-stack.ts, CDK will try to
+# pull a non-existent base image tag during docker build and fail with
+# "failed to resolve reference ... 403 Forbidden".
+REQ_HASH=$(cat "$REQUIREMENTS_FILE" "$BASE_DOCKERFILE" | shasum -a 256 | awk '{print substr($1, 1, 16)}')
 TAG="req-$REQ_HASH"
 
 # Resolve AWS account for ECR URI.

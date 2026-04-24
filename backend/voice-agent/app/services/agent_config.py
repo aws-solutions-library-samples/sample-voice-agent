@@ -224,33 +224,48 @@ async def _load_via_lambda_invoke(
     if lambda_client is not None:
         # Test-injected client (tests pass an AsyncMock). Must expose
         # .invoke() → dict with 'Payload' key (async iterable of bytes
-        # or a .read() coroutine, same as real aioboto3 client).
+        # or a .read() coroutine, same as the aioboto3 / boto3 wrapper).
         resp = await lambda_client.invoke(
             FunctionName=function_name,
             InvocationType="RequestResponse",
             Payload=payload_bytes,
         )
     else:
-        # Lazy import so tests that don't use this path don't require
-        # aioboto3 to be installed. aioboto3 IS in requirements.txt
-        # (ships with the fork's sagemaker extra) so it's present in
-        # production Docker image.
-        import aioboto3  # noqa: WPS433 — deliberate lazy import
+        # Synchronous boto3 invoked via asyncio.to_thread. This
+        # intentionally does NOT use aioboto3 — we saw intermittent
+        # "Connection closed" errors from aiobotocore during Lambda
+        # cold-start responses, despite the Lambda successfully
+        # processing the invoke. Synchronous boto3 is battle-tested
+        # for this exact call pattern (same approach the OG EC2
+        # voice-engine uses in core/lambda_client.py).
+        #
+        # The call takes ~200ms warm, ~1.2s cold. Blocking a worker
+        # thread that briefly is fine — we're making a single call per
+        # call-start, not a hot path.
+        import asyncio
+        import boto3  # noqa: WPS433 — deliberate lazy import
 
-        session = aioboto3.Session()
-        async with session.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1")) as client:
-            resp = await client.invoke(
+        def _sync_invoke():
+            client = boto3.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+            return client.invoke(
                 FunctionName=function_name,
                 InvocationType="RequestResponse",
                 Payload=payload_bytes,
             )
 
-    # Both real aioboto3 + typical mock stubs return a response dict
-    # whose 'Payload' is a StreamingBody (async .read() → bytes). Some
-    # mocks put raw bytes directly on Payload; handle both.
+        resp = await asyncio.to_thread(_sync_invoke)
+
+    # Payload handling: sync boto3 returns a StreamingBody with sync
+    # .read(); async mocks may return an awaitable. Handle both.
     raw = resp["Payload"]
     if hasattr(raw, "read"):
-        raw = await raw.read()
+        read_result = raw.read()
+        # Sync boto3's StreamingBody.read() returns bytes directly.
+        # Async mocks return a coroutine — await it.
+        if hasattr(read_result, "__await__"):
+            raw = await read_result
+        else:
+            raw = read_result
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode("utf-8")
     outer = _json.loads(raw)
