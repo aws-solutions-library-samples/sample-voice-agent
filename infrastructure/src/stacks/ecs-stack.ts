@@ -254,12 +254,20 @@ export class EcsStack extends cdk.Stack {
           'bedrock:ConverseStream',
         ],
         resources: [
-          // Foundation models - allow all US regions for cross-region inference
-          'arn:aws:bedrock:us-*::foundation-model/anthropic.claude-3-5-haiku-*',
-          'arn:aws:bedrock:us-*::foundation-model/anthropic.claude-3-haiku-*',
-          'arn:aws:bedrock:us-*::foundation-model/anthropic.claude-haiku-4-5-*',
-          // Inference profiles (required for on-demand throughput)
+          // Foundation models — allow all Anthropic Claude variants (Haiku,
+          // Sonnet, Opus) across all US regions for cross-region inference.
+          // Bedrock's Converse/ConverseStream IAM check verifies permission
+          // on BOTH the inference profile AND the underlying foundation
+          // model; a narrower list here will silently 403 calls to any
+          // Aurora-configured agent using a non-Haiku model. Chris uses
+          // claude-sonnet-4-6; Cindy/Chloe pending. See 2026-04-24 incident.
+          'arn:aws:bedrock:us-*::foundation-model/anthropic.claude-*',
+          // Inference profiles (required for on-demand throughput).
           `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/us.anthropic.claude-*`,
+          // Global inference profiles — some Sonnet/Opus variants expose
+          // cross-region routing via the `global.` prefix; safe to include
+          // because it's scoped to our account.
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/global.anthropic.claude-*`,
         ],
       })
     );
