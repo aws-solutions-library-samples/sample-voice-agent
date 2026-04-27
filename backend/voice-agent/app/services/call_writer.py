@@ -211,3 +211,102 @@ async def write_call_record(record: CallRecord) -> bool:
         body=body_text,
     )
     return False
+
+
+async def trigger_auto_actions(call_id: str) -> Optional[Dict[str, Any]]:
+    """Phase 7E: invoke Lambda's POST /api/auto-actions for a saved call.
+
+    The Lambda reads the just-written ``voice_calls`` row (status,
+    transcript, post_call_analyses, case_data) and performs the
+    derived writes:
+      - voice_call_costs   (telephony / STT / LLM / TTS unit costs)
+      - voice_call_scores  (collected_reference, collected_deadline,
+                            collected_action, collected_fax_portal,
+                            confirmed_denial_reason → overall_score)
+      - voice_auto_actions (create_task, log_ar_call, route_denial)
+
+    Mirrors OG ``core/lambda_client.trigger_auto_actions`` (it's a
+    no-op call for agents whose post_call_analyses fields don't carry
+    the auto-action signals — Chris today has only "call summary" so
+    only voice_call_costs + voice_call_scores get rows; tasks +
+    denial routing fire when fields like ``action_required`` /
+    ``denial_reason_confirmed`` show up in the extraction).
+
+    Best-effort. Returns the Lambda's parsed response on success (with
+    ``actions_taken``, ``cost``, ``quality_score``), or None on any
+    failure. Caller should treat None as "skipped" — the voice_calls
+    row is already saved, so call history stays intact even if
+    auto-actions fail to fire.
+    """
+    lambda_name = os.environ.get(VOICE_API_LAMBDA_NAME_ENV, "").strip()
+    if not lambda_name:
+        logger.warning(
+            "auto_actions_skipped_no_lambda_env",
+            call_id=call_id,
+            env_var=VOICE_API_LAMBDA_NAME_ENV,
+        )
+        return None
+
+    payload = {
+        "httpMethod": "POST",
+        "path": "/api/auto-actions",
+        "queryStringParameters": None,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"call_id": call_id}),
+    }
+
+    try:
+        resp = await asyncio.to_thread(
+            _LAMBDA.invoke,
+            FunctionName=lambda_name,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(payload).encode("utf-8"),
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        logger.error(
+            "auto_actions_invoke_failed",
+            call_id=call_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return None
+
+    raw = resp.get("Payload")
+    if raw is None:
+        logger.error("auto_actions_no_payload", call_id=call_id)
+        return None
+
+    try:
+        envelope = json.loads(raw.read())
+    except (ValueError, json.JSONDecodeError) as exc:
+        logger.error(
+            "auto_actions_bad_envelope",
+            call_id=call_id,
+            error=str(exc),
+        )
+        return None
+
+    status = envelope.get("statusCode", 0)
+    body_text = envelope.get("body", "{}") or "{}"
+    try:
+        body = json.loads(body_text)
+    except (TypeError, json.JSONDecodeError):
+        body = {}
+
+    if 200 <= status < 300:
+        logger.info(
+            "auto_actions_complete",
+            call_id=call_id,
+            actions_taken=body.get("actions_taken"),
+            quality_score=body.get("quality_score"),
+            cost=body.get("cost"),
+        )
+        return body
+
+    logger.error(
+        "auto_actions_failed",
+        call_id=call_id,
+        status_code=status,
+        body=body_text[:300],
+    )
+    return None

@@ -237,6 +237,17 @@ class PipelineConfig:
     batch_id: Optional[str] = None
     batch_row_index: Optional[int] = None
 
+    # Phase 7E PR 2: agent's post-call analyses config (model + fields).
+    # Carried as ``Any`` so PipelineConfig stays import-light (the
+    # Pydantic model lives in app/services/agent_config). When set,
+    # _run_pipeline.finally invokes app/services/post_call to extract
+    # structured fields from the transcript and writes them back to
+    # voice_calls.post_call_analyses BEFORE triggering auto-actions.
+    # None for agents without PCA configured — auto-actions still
+    # fires but reads an empty post_call_analyses dict and only
+    # cost+score get computed.
+    post_call_config: Optional[Any] = None
+
     # Observability — logged at pipeline creation
     config_load_time_ms: float = 0.0
     config_load_status: str = "loaded"  # 'loaded' | 'fallback' | 'partial'

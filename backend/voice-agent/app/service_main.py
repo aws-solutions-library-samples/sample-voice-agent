@@ -465,6 +465,10 @@ class PipelineManager:
                 effective_stt_keywords = list(agent_config.stt.keywords)
                 effective_tools_config = [t.model_dump() for t in agent_config.tools]
                 effective_agent_name = agent_config.name or (agent_id or "")
+                # Phase 7E PR 2: capture the PCA config so the finally
+                # block can invoke run_post_call_analyses against the
+                # accumulated transcript before triggering auto-actions.
+                effective_post_call_config = agent_config.post_call_analyses
                 effective_agent_id = agent_config.meta.agent_id or (agent_id or "")
                 effective_agent_version = agent_config.meta.version
             else:
@@ -483,6 +487,7 @@ class PipelineManager:
                 effective_agent_name = ""
                 effective_agent_id = agent_id or ""
                 effective_agent_version = 0
+                effective_post_call_config = None
 
             config = PipelineConfig(
                 room_url=room_url,
@@ -533,6 +538,8 @@ class PipelineManager:
                 or ("inbound" if dialin_settings else "outbound" if dialout_settings else ""),
                 batch_id=batch_id,
                 batch_row_index=batch_row_index,
+                # Phase 7E PR 2: per-agent post-call analysis config.
+                post_call_config=effective_post_call_config,
             )
 
             # Create the pipeline with metrics collector
@@ -572,6 +579,7 @@ class PipelineManager:
             try:
                 from app.services.call_writer import (
                     CallRecord,
+                    trigger_auto_actions,
                     write_call_record,
                 )
 
@@ -623,7 +631,55 @@ class PipelineManager:
                     batch_id=cfg_batch_id,
                     batch_row_index=cfg_batch_row_index,
                 )
-                await write_call_record(record)
+                first_write_ok = await write_call_record(record)
+
+                # Phase 7E PR 2: post-call analyses + auto-actions.
+                # Only attempt when the first write actually landed —
+                # /auto-actions reads voice_calls so it'll just 404 if
+                # the row didn't get persisted.
+                if first_write_ok:
+                    pca_cfg = config.post_call_config if config else None
+                    # Run analyses only on completed calls. Cancelled /
+                    # failed conversations rarely have the structured
+                    # payload an agent designer's PCA fields expect, and
+                    # the LLM call costs money / time.
+                    if (
+                        end_status == "completed"
+                        and pca_cfg is not None
+                        and getattr(pca_cfg, "fields", None)
+                    ):
+                        try:
+                            from app.services.post_call import run_post_call_analyses
+
+                            analyses = await run_post_call_analyses(
+                                pca_cfg,
+                                collector.transcript,
+                                cfg_case_data,
+                            )
+                            if analyses:
+                                # Patch into the record + re-upsert so
+                                # /auto-actions reads the populated
+                                # column. write_call_record uses ON
+                                # CONFLICT semantics; this is cheap.
+                                record.post_call_analyses = analyses
+                                await write_call_record(record)
+                        except Exception:
+                            logger.exception(
+                                "post_call_analyses_unexpected_error",
+                                call_id=call_id,
+                            )
+
+                    # Trigger derived writes (cost / score / actions).
+                    # Cheap when post_call_analyses is empty — the
+                    # Lambda still computes telephony cost + a baseline
+                    # score row.
+                    try:
+                        await trigger_auto_actions(call_id)
+                    except Exception:
+                        logger.exception(
+                            "auto_actions_unexpected_error",
+                            call_id=call_id,
+                        )
             except Exception:
                 # Should never raise (write_call_record swallows), but
                 # belt-and-suspenders so finally can't crash.
