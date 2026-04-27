@@ -81,32 +81,60 @@ def create_stt_service(config: "PipelineConfig"):
     else:
         # Default to Deepgram cloud API
         from pipecat.services.deepgram.stt import DeepgramSTTService
+        from pipecat.transcriptions.language import Language
 
         api_key = os.getenv("DEEPGRAM_API_KEY")
         if not api_key:
             raise ValueError("DEEPGRAM_API_KEY environment variable required for STT")
 
-        # TODO(phase-7A-followup): pass config.stt_language + config.stt_keywords
-        # into the DeepgramSTTService constructor. Requires verifying the
-        # pipecat-ai DeepgramSTTService kwarg names for keywords (some versions
-        # accept `keywords=[...]`, others require `LiveOptions`). Not blocking
-        # Chris parity — Chris has empty keywords on prod — but important for
-        # future agents (Cindy's domain terms like EOB, denied claim, etc.).
-        language = getattr(config, "stt_language", "en") or "en"
+        # Phase 7A-followup (resolved 2026-04-27): wire stt_language +
+        # stt_keywords from Aurora into Deepgram's Settings API.
+        # Pipecat 0.0.108 exposes both via DeepgramSTTService.Settings
+        # (model + language inherited from STTSettings, keywords on the
+        # Deepgram-specific subclass). language is a StrEnum keyed on
+        # BCP-47 codes ("en", "en-US", "es", …); we coerce via
+        # Language(<str>) and fall back to default if Aurora supplies
+        # something the enum doesn't know.
+        raw_language = (getattr(config, "stt_language", "") or "en").strip()
         keywords = list(getattr(config, "stt_keywords", []) or [])
+
+        try:
+            language_enum = Language(raw_language) if raw_language else None
+        except ValueError:
+            logger.warning(
+                "stt_language_unknown_fallback_to_default",
+                provider="deepgram",
+                supplied=raw_language,
+            )
+            language_enum = None
+
+        # Build Settings only when we actually have something non-default
+        # to apply — keeps the deployment indistinguishable from pre-7A
+        # for agents with empty stt_language / stt_keywords (Chris).
+        stt_settings = None
+        if language_enum is not None or keywords:
+            settings_kwargs: dict[str, Any] = {}
+            if language_enum is not None:
+                settings_kwargs["language"] = language_enum
+            if keywords:
+                # Deepgram accepts keywords as list[str] OR comma-separated
+                # str; the SDK normalizes. We pass a list so any Aurora-
+                # configured single-word entries don't get split.
+                settings_kwargs["keywords"] = keywords
+            stt_settings = DeepgramSTTService.Settings(**settings_kwargs)
 
         logger.info(
             "stt_provider_selected",
             provider="deepgram",
-            language=language,
+            language=raw_language,
             keywords_count=len(keywords),
-            keywords_wired=False,  # flip to True when the TODO above lands
+            keywords_wired=stt_settings is not None,
         )
 
-        return DeepgramSTTService(
-            api_key=api_key,
-            sample_rate=8000,
-        )
+        kwargs: dict[str, Any] = {"api_key": api_key, "sample_rate": 8000}
+        if stt_settings is not None:
+            kwargs["settings"] = stt_settings
+        return DeepgramSTTService(**kwargs)
 
 
 def create_tts_service(config: "PipelineConfig"):
