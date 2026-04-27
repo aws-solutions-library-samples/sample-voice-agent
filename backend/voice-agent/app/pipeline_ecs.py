@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.turns.user_start import VADUserTurnStartStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.frames.frames import (
     LLMMessagesUpdateFrame,
     EndFrame,
@@ -157,6 +162,15 @@ VAD_MIN_VOLUME = float(os.getenv("VAD_MIN_VOLUME", "0.75"))
 VAD_CONFIDENCE = float(os.getenv("VAD_CONFIDENCE", "0.7"))
 VAD_START_SECS = float(os.getenv("VAD_START_SECS", "0.2"))
 VAD_STOP_SECS = float(os.getenv("VAD_STOP_SECS", "0.2"))
+
+# Smart-turn analyzer stop_secs. Pipecat's auto-default when no
+# user_turn_strategies is supplied: LocalSmartTurnAnalyzerV3() with
+# stop_secs=3.0. Three full seconds of mandatory wait after VAD
+# silence detection — the single biggest contributor to "the bot
+# feels sluggish" complaints. OG voiceagent ships at 0.8 (proven
+# safe in production for hundreds of calls). Env-overridable for
+# per-deploy tuning if specific agent flows need a longer hold.
+SMART_TURN_STOP_SECS = float(os.getenv("SMART_TURN_STOP_SECS", "0.8"))
 
 
 def _get_llm_model_id() -> str:
@@ -528,9 +542,47 @@ async def create_voice_pipeline(
         messages,
         tools=tools_schema if tools_schema else NOT_GIVEN,
     )
+    # Phase 7E follow-up: explicit user-turn strategies. Pipecat's
+    # defaults bite us in two ways on phone calls:
+    #
+    #   1. ``LocalSmartTurnAnalyzerV3()`` with default ``stop_secs=3.0``
+    #      forces 3 seconds of dead air after VAD silence, even when
+    #      the model is highly confident the turn is over.
+    #
+    #   2. The default user-turn-START strategy bundle includes
+    #      TranscriptionUserTurnStartStrategy, which opens a fresh
+    #      "user is speaking" turn on every interim/final STT frame.
+    #      With Deepgram's per-segment finalizations, fragmented
+    #      utterances (e.g. "Okay…" pause "…it was denied") spawn
+    #      a SECOND virtual turn that has to time out before the LLM
+    #      is unblocked. Observed on 2026-04-27 session voice-95716348
+    #      as a 9s stall mid-call.
+    #
+    # Both fixes match OG voiceagent (core/pipeline.py:_build_user_aggregator_params)
+    # which has run this combination in prod for months without issue.
+    smart_turn_analyzer = LocalSmartTurnAnalyzerV3(
+        params=SmartTurnParams(stop_secs=SMART_TURN_STOP_SECS),
+    )
+    user_turn_strategies = UserTurnStrategies(
+        # VAD-only on the start side. Drop the default
+        # TranscriptionUserTurnStartStrategy so per-segment STT
+        # finalizations can't open phantom user turns.
+        start=[VADUserTurnStartStrategy()],
+        stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=smart_turn_analyzer)],
+    )
+    logger.info(
+        "user_turn_strategies_configured",
+        smart_turn_stop_secs=SMART_TURN_STOP_SECS,
+        start_strategies=["VADUserTurnStartStrategy"],
+        stop_strategies=["TurnAnalyzerUserTurnStopStrategy"],
+    )
+
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=vad_analyzer),
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=vad_analyzer,
+            user_turn_strategies=user_turn_strategies,
+        ),
     )
     logger.info("llm_context_created", tools_enabled=bool(tools_list))
 
