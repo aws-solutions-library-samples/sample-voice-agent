@@ -232,6 +232,12 @@ def start_session(event: dict, context: Any) -> dict:
                 "sip_uri": sip_uri,
             },
             agent_id=agent_id,
+            # Phase 7E call-history fields. ``to_number`` is the
+            # number we own (the dialed-in destination); ``from``
+            # is the caller. ``direction`` is fixed to "inbound".
+            target_number=to_number,
+            from_number=from_number,
+            direction="inbound",
         )
         logger.info(
             f"[{request_id}] Service response: {service_response.get('status')}"
@@ -409,6 +415,12 @@ def start_dial_out(event: dict, context: Any) -> dict:
             ),
             agent_id=agent_id,
             case_data=case_data,
+            # Phase 7E call-history fields.
+            target_number=to_number,
+            from_number=from_number or "",
+            direction="outbound",
+            batch_id=body.get("batch_id"),
+            batch_row_index=body.get("batch_row_index"),
         )
 
         if service_response.get("status") not in ("started",):

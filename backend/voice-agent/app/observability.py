@@ -417,7 +417,14 @@ class ConversationObserver(BaseObserver):
         self._current_bot_text = []
 
     def _log_conversation_turn(self, speaker: str, content: str) -> None:
-        """Log a conversation turn with correlation fields."""
+        """Log a conversation turn with correlation fields.
+
+        Phase 7E: in addition to emitting the structured ``conversation_
+        turn`` log line (consumed by CloudWatch + analysis tooling), we
+        also append the turn to ``self._collector._transcript`` so the
+        after-call ``CallWriter`` can persist the full transcript to
+        ``voice_calls.transcript`` without having to scrape logs.
+        """
         turn_number = self._collector.turn_count or 1
 
         logger.info(
@@ -428,6 +435,21 @@ class ConversationObserver(BaseObserver):
             speaker=speaker,
             content=content,
         )
+
+        # In-memory transcript for end-of-call persistence. Best-effort
+        # — never let a logging-side issue break the conversation flow.
+        try:
+            self._collector.append_transcript_turn(
+                turn_number=turn_number,
+                speaker=speaker,
+                content=content,
+            )
+        except Exception:
+            logger.exception(
+                "transcript_append_failed",
+                call_id=self._collector.call_id,
+                turn_number=turn_number,
+            )
 
     def _log_barge_in(self) -> None:
         """Log a barge-in event when user interrupts the bot."""
@@ -1752,12 +1774,66 @@ class MetricsCollector:
         # E2E timing state
         self._vad_stop_time: Optional[float] = None
 
+        # Phase 7E: in-memory transcript accumulator. Each entry is
+        # ``{"turn_number": int, "speaker": "user"|"assistant",
+        #    "content": str, "timestamp": iso8601}``.
+        # ConversationObserver appends here as turns finalize; the
+        # after-call CallWriter pulls this list and persists it to
+        # voice_calls.transcript via the Lambda.
+        self._transcript: List[Dict[str, Any]] = []
+
         logger.debug(
             "metrics_collector_created",
             call_id=call_id,
             session_id=session_id,
             environment=self.environment,
         )
+
+    def append_transcript_turn(
+        self,
+        *,
+        turn_number: int,
+        speaker: str,
+        content: str,
+    ) -> None:
+        """Record a single transcribed turn for end-of-call persistence.
+
+        Called by ConversationObserver._log_conversation_turn each
+        time STT or LLM-output completes a turn. Idempotent: same
+        (turn_number, speaker, content) triple is deduped to handle
+        the rare case where the observer fires twice on a frame
+        broadcast (pipecat does this for some frame types).
+        """
+        if not content:
+            return
+
+        # Cheap dedup: skip if this matches the very last entry. Full
+        # cross-list dedup would be O(N) per turn — overkill given
+        # how rare double-emit is.
+        if self._transcript:
+            last = self._transcript[-1]
+            if (
+                last.get("turn_number") == turn_number
+                and last.get("speaker") == speaker
+                and last.get("content") == content
+            ):
+                return
+
+        from datetime import datetime, timezone as _tz
+
+        self._transcript.append(
+            {
+                "turn_number": turn_number,
+                "speaker": speaker,
+                "content": content,
+                "timestamp": datetime.now(_tz.utc).isoformat(),
+            }
+        )
+
+    @property
+    def transcript(self) -> List[Dict[str, Any]]:
+        """Read-only view of the accumulated transcript."""
+        return list(self._transcript)
 
     # -------------------------------------------------------------------------
     # Timing Context Managers

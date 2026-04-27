@@ -226,6 +226,17 @@ class PipelineConfig:
     # None for inbound calls.
     dialout_settings: Optional[Dict[str, Any]] = None
 
+    # Phase 7E call-history fields. Used by app/services/call_writer
+    # to populate voice_calls.target_number / from_number / direction
+    # / batch_* on the after-call upsert. Empty strings preserve the
+    # NOT-NULL contract on target_number when callers don't supply
+    # one (the Lambda accepts '' and the row is still queryable).
+    target_number: str = ""
+    from_number: str = ""
+    direction: str = ""  # 'inbound' | 'outbound'; '' means caller didn't say
+    batch_id: Optional[str] = None
+    batch_row_index: Optional[int] = None
+
     # Observability — logged at pipeline creation
     config_load_time_ms: float = 0.0
     config_load_status: str = "loaded"  # 'loaded' | 'fallback' | 'partial'

@@ -217,6 +217,16 @@ class PipelineManager:
         agent_id: Optional[str] = None,
         case_data: Optional[dict] = None,
         dialout_settings: Optional[dict] = None,
+        # Phase 7E call-history threading. Inbound: from_number is
+        # the caller's number, target_number is what we own.
+        # Outbound: from_number is our caller-id, target_number is
+        # the dialed PSTN. direction is set explicitly so we don't
+        # have to infer from settings shape.
+        target_number: Optional[str] = None,
+        from_number: Optional[str] = None,
+        direction: Optional[str] = None,
+        batch_id: Optional[str] = None,
+        batch_row_index: Optional[int] = None,
     ) -> dict:
         """Start a new call pipeline."""
         # Reject calls when draining (SIGTERM received)
@@ -296,6 +306,11 @@ class PipelineManager:
                 agent_id=agent_id,
                 case_data=case_data,
                 dialout_settings=dialout_settings,
+                target_number=target_number,
+                from_number=from_number,
+                direction=direction,
+                batch_id=batch_id,
+                batch_row_index=batch_row_index,
             )
         )
         self.active_sessions[session_id] = task
@@ -323,6 +338,11 @@ class PipelineManager:
         agent_id: Optional[str] = None,
         case_data: Optional[dict] = None,
         dialout_settings: Optional[dict] = None,
+        target_number: Optional[str] = None,
+        from_number: Optional[str] = None,
+        direction: Optional[str] = None,
+        batch_id: Optional[str] = None,
+        batch_row_index: Optional[int] = None,
     ):
         """Run a voice pipeline for a call."""
         # Bind call_id to all logs in this context
@@ -338,6 +358,18 @@ class PipelineManager:
         transport = None
         error_category = None  # Track error category for session health emission
         end_status = "completed"  # Track end status for session tracking
+
+        # Phase 7E call-history bookkeeping. Captured locally so the
+        # finally block can build a CallRecord without re-deriving
+        # state. Last error message gets carried into voice_calls.
+        from datetime import datetime as _dt, timezone as _tz
+        call_started_at = _dt.now(_tz.utc)
+        call_error: Optional[str] = None
+        # ``effective_*`` from the loader path (populated in the try
+        # below) is needed by the finally writer too.
+        effective_agent_name_local = ""
+        effective_agent_display_local = ""
+        config: Optional[PipelineConfig] = None  # for finally-block access
 
         try:
             logger.info("pipeline_starting")
@@ -416,6 +448,8 @@ class PipelineManager:
             # present; otherwise fall through to the pre-7A ENV / provider
             # defaults so existing callers aren't broken.
             if agent_config:
+                effective_agent_display_local = agent_config.display_name or ""
+                effective_agent_name_local = agent_config.name or (agent_id or "")
                 effective_voice_id = (
                     agent_config.tts.voice_id or self.config.providers.voice_id
                 )
@@ -489,6 +523,16 @@ class PipelineManager:
                 config_load_time_ms=config_load_time_ms,
                 config_load_status=config_load_status,
                 dialout_settings=dialout_settings,
+                # Phase 7E: call-history fields. Auto-derive direction
+                # from settings shape when caller didn't supply it
+                # (dialin_settings → inbound, dialout_settings →
+                # outbound, neither → '' and CallWriter will note it).
+                target_number=target_number or "",
+                from_number=from_number or "",
+                direction=direction
+                or ("inbound" if dialin_settings else "outbound" if dialout_settings else ""),
+                batch_id=batch_id,
+                batch_row_index=batch_row_index,
             )
 
             # Create the pipeline with metrics collector
@@ -511,6 +555,7 @@ class PipelineManager:
         except Exception as e:
             end_status = "error"
             error_category = categorize_error(e)
+            call_error = str(e)[:1000]  # Phase 7E: persist for voice_calls.error
             collector.finalize(status="error", error_category=error_category)
             logger.error(
                 "pipeline_error",
@@ -520,6 +565,73 @@ class PipelineManager:
             )
 
         finally:
+            # Phase 7E: persist call history to voice_calls. Best-
+            # effort — write_call_record never raises, only logs on
+            # failure. Map our internal end_status to a voice_calls
+            # ``status`` column value the call-history UI knows about.
+            try:
+                from app.services.call_writer import (
+                    CallRecord,
+                    write_call_record,
+                )
+
+                _status_map = {
+                    "completed": "completed",
+                    "cancelled": "cancelled",
+                    "error": "failed",
+                }
+                vc_status = _status_map.get(end_status, end_status)
+                ended_at = _dt.now(_tz.utc)
+                duration = max(
+                    0,
+                    int((ended_at - call_started_at).total_seconds()),
+                )
+
+                # Resolve identity, falling back to whatever we have.
+                # config may be None if PipelineConfig construction
+                # itself raised, so guard accesses.
+                cfg_target = config.target_number if config else (target_number or "")
+                cfg_from = config.from_number if config else (from_number or "")
+                cfg_direction = (
+                    config.direction
+                    if config and config.direction
+                    else (direction or "")
+                )
+                cfg_batch_id = config.batch_id if config else batch_id
+                cfg_batch_row_index = (
+                    config.batch_row_index if config else batch_row_index
+                )
+                # case_data isn't a PipelineConfig field (it's
+                # hydrated into system_prompt before construction).
+                # Pull from the local _run_pipeline parameter.
+                cfg_case_data = case_data or {}
+
+                record = CallRecord(
+                    id=call_id,
+                    agent_name=effective_agent_name_local or (agent_id or ""),
+                    agent_display_name=effective_agent_display_local,
+                    target_number=cfg_target or "",
+                    from_number=cfg_from or "",
+                    direction=cfg_direction or "",
+                    status=vc_status,
+                    started_at=call_started_at,
+                    ended_at=ended_at,
+                    duration_secs=duration,
+                    case_data=cfg_case_data or {},
+                    transcript=collector.transcript,
+                    error=call_error,
+                    batch_id=cfg_batch_id,
+                    batch_row_index=cfg_batch_row_index,
+                )
+                await write_call_record(record)
+            except Exception:
+                # Should never raise (write_call_record swallows), but
+                # belt-and-suspenders so finally can't crash.
+                logger.exception(
+                    "call_record_write_unexpected_error",
+                    call_id=call_id,
+                )
+
             # Remove from active sessions
             self.active_sessions.pop(session_id, None)
 
@@ -681,6 +793,14 @@ async def handle_call(request: web.Request) -> web.Response:
             agent_id=data.get("agent_id"),
             case_data=data.get("case_data"),
             dialout_settings=data.get("dialout_settings"),
+            # Phase 7E call-history fields. Optional; CallWriter
+            # tolerates missing values, but populating them gives
+            # the call-history UI useful columns.
+            target_number=data.get("target_number"),
+            from_number=data.get("from_number"),
+            direction=data.get("direction"),
+            batch_id=data.get("batch_id"),
+            batch_row_index=data.get("batch_row_index"),
         )
 
         status_code = result.pop(

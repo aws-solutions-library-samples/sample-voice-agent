@@ -75,6 +75,15 @@ class EcsServiceClient:
         agent_id: Optional[str] = None,
         case_data: Optional[dict] = None,
         dialout_settings: Optional[dict] = None,
+        # Phase 7E call-history fields. Optional; ECS handle_call
+        # tolerates missing values, but populating them gives the
+        # call-history UI useful columns and lets the after-call
+        # writer produce a properly attributed voice_calls row.
+        target_number: Optional[str] = None,
+        from_number: Optional[str] = None,
+        direction: Optional[str] = None,
+        batch_id: Optional[str] = None,
+        batch_row_index: Optional[int] = None,
     ) -> dict:
         """
         Start a voice call by sending request to the ECS service.
@@ -126,6 +135,20 @@ class EcsServiceClient:
             # transport.start_dialout({phone_number, caller_id}) after
             # joining the room.
             payload["dialout_settings"] = dialout_settings  # type: ignore
+
+        # Phase 7E call-history threading. Each is conditional so we
+        # don't clutter the payload with empty fields when callers
+        # didn't supply them.
+        if target_number:
+            payload["target_number"] = target_number  # type: ignore
+        if from_number:
+            payload["from_number"] = from_number  # type: ignore
+        if direction:
+            payload["direction"] = direction  # type: ignore
+        if batch_id:
+            payload["batch_id"] = batch_id  # type: ignore
+        if batch_row_index is not None:
+            payload["batch_row_index"] = batch_row_index  # type: ignore
 
         logger.info(f"Sending call request to service: session_id={session_id}")
 
