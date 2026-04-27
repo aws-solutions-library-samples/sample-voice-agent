@@ -74,6 +74,7 @@ class EcsServiceClient:
         dialin_settings: Optional[dict] = None,
         agent_id: Optional[str] = None,
         case_data: Optional[dict] = None,
+        dialout_settings: Optional[dict] = None,
     ) -> dict:
         """
         Start a voice call by sending request to the ECS service.
@@ -119,6 +120,12 @@ class EcsServiceClient:
 
         if case_data:
             payload["case_data"] = case_data  # type: ignore
+
+        if dialout_settings:
+            # Phase 7D: outbound dialing. Pipeline calls
+            # transport.start_dialout({phone_number, caller_id}) after
+            # joining the room.
+            payload["dialout_settings"] = dialout_settings  # type: ignore
 
         logger.info(f"Sending call request to service: session_id={session_id}")
 

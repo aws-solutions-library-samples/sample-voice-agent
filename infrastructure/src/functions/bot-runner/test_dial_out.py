@@ -100,12 +100,29 @@ class TestStartDialOutValidation(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 400)
         self.assertIn("to_number", json.loads(resp["body"])["error"])
 
-    def test_missing_from_number_returns_400(self):
-        resp = handler.start_dial_out(
-            self._event({"to_number": "+15551111111", "agent_id": "x"}), self.ctx
-        )
-        self.assertEqual(resp["statusCode"], 400)
-        self.assertIn("from_number", json.loads(resp["body"])["error"])
+    def test_missing_from_number_is_OK(self):
+        # from_number is optional — Daily picks a default caller ID
+        # when omitted. Validation should NOT 400 here. The full flow
+        # would still need DailyClient + ECS mocks to complete; we
+        # only assert validation passes (i.e. doesn't 400).
+        with patch.object(handler, "EcsServiceClient") as mock_svc_cls, \
+             patch.object(handler, "DailyClient") as mock_daily_cls:
+            mock_daily = MagicMock()
+            mock_daily.create_room.return_value = {"url": "u", "name": "n"}
+            mock_daily.create_meeting_token.return_value = "T"
+            mock_daily_cls.return_value = mock_daily
+            mock_svc = MagicMock()
+            mock_svc.start_call.return_value = {"status": "started"}
+            mock_svc_cls.return_value = mock_svc
+            resp = handler.start_dial_out(
+                self._event({"to_number": "+15551111111", "agent_id": "x"}), self.ctx
+            )
+            self.assertEqual(resp["statusCode"], 200)
+            # dialout_settings should omit caller_id when from_number absent
+            svc_kwargs = mock_svc.start_call.call_args.kwargs
+            self.assertEqual(
+                svc_kwargs["dialout_settings"], {"phone_number": "+15551111111"}
+            )
 
     def test_missing_agent_id_returns_400(self):
         resp = handler.start_dial_out(
@@ -138,14 +155,13 @@ class TestStartDialOutHappyPath(unittest.TestCase):
     @patch.object(handler, "EcsServiceClient")
     @patch.object(handler, "DailyClient")
     def test_full_flow(self, mock_daily_cls, mock_svc_cls):
-        # Mock Daily room creation, token, dialOut
+        # Mock Daily room creation + token
         mock_daily = MagicMock()
         mock_daily.create_room.return_value = {
             "url": "https://test.daily.co/voice-out-deadbeef",
             "name": "voice-out-deadbeef",
         }
         mock_daily.create_meeting_token.return_value = "TOKEN-123"
-        mock_daily.dial_out.return_value = {"sessionId": "out-leg-1"}
         mock_daily_cls.return_value = mock_daily
 
         # Mock ECS accept
@@ -172,30 +188,33 @@ class TestStartDialOutHappyPath(unittest.TestCase):
         self.assertEqual(body["status"], "started")
         self.assertIn("room_url", body)
 
-        # Daily was called with dial-out room mode
+        # Daily was called with sip_mode=dial-in (the only mode Daily
+        # accepts; the outbound leg is initiated by the bot in the
+        # room via transport.start_dialout(), not a REST call).
         room_kwargs = mock_daily.create_room.call_args.kwargs
         sip_cfg = room_kwargs["properties"]["sip"]
-        self.assertEqual(sip_cfg["sip_mode"], "dial-out")
+        self.assertEqual(sip_cfg["sip_mode"], "dial-in")
 
-        # Bot token was generated as owner
+        # Bot token was generated as owner (start_dialout requires it)
         token_kwargs = mock_daily.create_meeting_token.call_args.kwargs
         self.assertTrue(token_kwargs["properties"]["is_owner"])
 
-        # ECS start_call was called with dialin_settings=None and the
-        # full case_data + agent_id threaded through.
+        # ECS start_call was called with dialin_settings=None,
+        # dialout_settings={phone_number, caller_id}, and the full
+        # case_data + agent_id threaded through.
         svc_kwargs = mock_svc.start_call.call_args.kwargs
         self.assertIsNone(svc_kwargs["dialin_settings"])
         self.assertEqual(svc_kwargs["agent_id"], "chris-claim-status")
         self.assertEqual(svc_kwargs["case_data"], {"Service_Date": "2026-04-01"})
         self.assertIsNone(svc_kwargs["system_prompt"])
+        self.assertEqual(
+            svc_kwargs["dialout_settings"],
+            {"phone_number": "+15551111111", "caller_id": "+15552222222"},
+        )
 
-        # dial_out called AFTER ECS handoff (room is live for the
-        # incoming SIP leg)
-        mock_daily.dial_out.assert_called_once()
-        dial_kwargs = mock_daily.dial_out.call_args.kwargs
-        self.assertEqual(dial_kwargs["phone_number"], "+15551111111")
-        self.assertEqual(dial_kwargs["caller_id"], "+15552222222")
-        self.assertEqual(dial_kwargs["room_name"], "voice-out-deadbeef")
+        # The Lambda no longer calls Daily's REST dialout — that's
+        # done by the pipeline once it joins the room.
+        mock_daily.dial_out.assert_not_called()
 
     @patch.object(handler, "EcsServiceClient")
     @patch.object(handler, "DailyClient")
@@ -261,21 +280,19 @@ class TestStartDialOutErrors(unittest.TestCase):
 
     @patch.object(handler, "EcsServiceClient")
     @patch.object(handler, "DailyClient")
-    def test_dial_out_failure_returns_503(self, mock_daily_cls, mock_svc_cls):
+    def test_room_creation_failure_returns_500(self, mock_daily_cls, mock_svc_cls):
+        # Daily room API failure now bubbles up via ValueError. The
+        # pre-7D flow had a separate dial_out failure mode via REST
+        # which is no longer relevant (start_dialout from the bot
+        # client surfaces errors via on_dialout_error events on the
+        # pipeline side, not synchronously here).
         mock_daily = MagicMock()
-        mock_daily.create_room.return_value = {"url": "u", "name": "n"}
-        mock_daily.create_meeting_token.return_value = "T"
-        mock_daily.dial_out.side_effect = ValueError("Daily API error: 402 - out of credit")
+        mock_daily.create_room.side_effect = ValueError("Daily API error: 402")
         mock_daily_cls.return_value = mock_daily
 
-        mock_svc = MagicMock()
-        mock_svc.start_call.return_value = {"status": "started"}
-        mock_svc_cls.return_value = mock_svc
-
         resp = handler.start_dial_out(self._ev(), self.ctx)
-        self.assertEqual(resp["statusCode"], 503)
-        body = json.loads(resp["body"])
-        self.assertIn("dialOut failed", body["error"])
+        # ValueError is caught at the top of start_dial_out → 400
+        self.assertEqual(resp["statusCode"], 400)
 
 
 if __name__ == "__main__":

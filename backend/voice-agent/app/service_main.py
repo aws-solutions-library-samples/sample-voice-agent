@@ -216,6 +216,7 @@ class PipelineManager:
         dialin_settings: Optional[dict] = None,
         agent_id: Optional[str] = None,
         case_data: Optional[dict] = None,
+        dialout_settings: Optional[dict] = None,
     ) -> dict:
         """Start a new call pipeline."""
         # Reject calls when draining (SIGTERM received)
@@ -294,6 +295,7 @@ class PipelineManager:
                 dialin_settings=dialin_settings,
                 agent_id=agent_id,
                 case_data=case_data,
+                dialout_settings=dialout_settings,
             )
         )
         self.active_sessions[session_id] = task
@@ -320,6 +322,7 @@ class PipelineManager:
         dialin_settings: Optional[dict],
         agent_id: Optional[str] = None,
         case_data: Optional[dict] = None,
+        dialout_settings: Optional[dict] = None,
     ):
         """Run a voice pipeline for a call."""
         # Bind call_id to all logs in this context
@@ -485,6 +488,7 @@ class PipelineManager:
                 tools_config=effective_tools_config,
                 config_load_time_ms=config_load_time_ms,
                 config_load_status=config_load_status,
+                dialout_settings=dialout_settings,
             )
 
             # Create the pipeline with metrics collector
@@ -663,6 +667,11 @@ async def handle_call(request: web.Request) -> web.Response:
         # omit it; outbound calls (Phase 7D) pass the batch row's
         # case_data so {{Service_Date}}, {{Patient_First_Name}} etc.
         # render against real values before reaching Bedrock.
+        #
+        # dialout_settings, when present, triggers
+        # transport.start_dialout() after the bot joins the room
+        # (see pipeline_ecs._wire_outbound_dialing). Shape:
+        #   {phone_number: "+1...", caller_id: "+1..."}
         result = await pipeline_manager.start_call(
             room_url=room_url,
             room_token=room_token,
@@ -671,6 +680,7 @@ async def handle_call(request: web.Request) -> web.Response:
             dialin_settings=data.get("dialin_settings"),
             agent_id=data.get("agent_id"),
             case_data=data.get("case_data"),
+            dialout_settings=data.get("dialout_settings"),
         )
 
         status_code = result.pop(

@@ -219,6 +219,13 @@ class PipelineConfig:
     stt_endpoint: str = ""
     tts_endpoint: str = ""
 
+    # Outbound dialing (Phase 7D). When set, the pipeline calls
+    # ``transport.start_dialout()`` from on_joined to ring the target
+    # PSTN number from inside the Daily room. Shape: ``{phone_number,
+    # caller_id}`` (matches Daily SDK call_client.start_dialout API).
+    # None for inbound calls.
+    dialout_settings: Optional[Dict[str, Any]] = None
+
     # Observability — logged at pipeline creation
     config_load_time_ms: float = 0.0
     config_load_status: str = "loaded"  # 'loaded' | 'fallback' | 'partial'
@@ -580,6 +587,56 @@ async def create_voice_pipeline(
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
         logger.info("daily_joined", data=str(data)[:200])
+
+        # Phase 7D: outbound dialing. The bot has joined the room;
+        # now we ring the target PSTN number from inside the room.
+        # Daily's start_dialout creates a SIP leg on the bot's
+        # connection — REST API can't initiate this, only an
+        # SDK-connected client can.
+        #
+        # Settings shape: {"phoneNumber", optional "callerId"}.
+        # The Daily SDK is camelCase; our incoming dict from the
+        # Lambda is snake_case so we adapt here.
+        if config.dialout_settings:
+            phone_number = config.dialout_settings.get("phone_number")
+            caller_id = config.dialout_settings.get("caller_id")
+            if phone_number:
+                sdk_settings: Dict[str, Any] = {"phoneNumber": phone_number}
+                if caller_id:
+                    sdk_settings["callerId"] = caller_id
+                logger.info(
+                    "outbound_dialing_target",
+                    session_id=config.session_id,
+                    to_number_mask=f"****{phone_number[-4:]}",
+                    caller_id_mask=(
+                        f"****{caller_id[-4:]}" if caller_id else None
+                    ),
+                )
+                try:
+                    session_id_out, err = await transport.start_dialout(sdk_settings)
+                    if err:
+                        logger.error(
+                            "outbound_dialout_failed",
+                            session_id=config.session_id,
+                            error=str(err),
+                        )
+                    else:
+                        logger.info(
+                            "outbound_dialout_initiated",
+                            session_id=config.session_id,
+                            dialout_session=session_id_out,
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "outbound_dialout_crashed",
+                        session_id=config.session_id,
+                        error=str(exc),
+                    )
+            else:
+                logger.warning(
+                    "outbound_dialout_skipped_no_phone",
+                    session_id=config.session_id,
+                )
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):

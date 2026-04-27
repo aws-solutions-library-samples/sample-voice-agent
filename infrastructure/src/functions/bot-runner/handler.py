@@ -312,14 +312,18 @@ def start_dial_out(event: dict, context: Any) -> dict:
         body = _parse_body(event)
 
         to_number = (body.get("to_number") or "").strip()
-        from_number = (body.get("from_number") or "").strip()
+        # from_number (caller ID) is optional. When omitted, Daily picks
+        # whatever default caller ID is assigned to the domain. When
+        # provided, it MUST be a number Daily recognizes as ours
+        # (purchased via /buy-phone-number) — using an unrelated number
+        # surfaces "Incorrect callerID! No phone number maps to..."
+        # from start_dialout.
+        from_number = (body.get("from_number") or "").strip() or None
         agent_id = (body.get("agent_id") or "").strip() or None
         case_data = body.get("case_data") or {}
 
         if not to_number:
             return _error_response(400, "Missing required field: to_number")
-        if not from_number:
-            return _error_response(400, "Missing required field: from_number")
         if not agent_id:
             return _error_response(400, "Missing required field: agent_id")
         if not isinstance(case_data, dict):
@@ -330,9 +334,14 @@ def start_dial_out(event: dict, context: Any) -> dict:
         daily_client = DailyClient()
         service_client = EcsServiceClient()
 
-        # Step 1: create Daily room. Outbound rooms don't need
-        # pinless_dialin — they only need SIP enabled so Daily can
-        # bridge the dialOut leg into them.
+        # Step 1: create Daily room. Daily's only valid sip_mode is
+        # ``dial-in`` (verified 2026-04-27 against
+        # https://docs.daily.co/reference/rest-api/rooms/config —
+        # there is no "dial-out" mode). The dialOut leg is created
+        # separately via Daily's POST /dialout endpoint and works
+        # from any room with SIP enabled. So we use sip_mode=dial-in
+        # here even for outbound calls; the room never actually
+        # receives an inbound SIP leg, only the dialOut bridge.
         logger.info(f"[{request_id}] creating outbound Daily room")
         room = daily_client.create_room(
             name=f"voice-out-{uuid.uuid4().hex[:12]}",
@@ -344,11 +353,7 @@ def start_dial_out(event: dict, context: Any) -> dict:
                 "sip": {
                     "display_name": "Voice Assistant",
                     "video": False,
-                    # ``dial-out`` mode tells Daily this room is for
-                    # OUTBOUND calling. The room won't accept inbound
-                    # SIP. dialOut creates a leg from the room to a
-                    # PSTN target.
-                    "sip_mode": "dial-out",
+                    "sip_mode": "dial-in",
                 },
                 "exp": int(time.time()) + 3600,
             },
@@ -372,10 +377,12 @@ def start_dial_out(event: dict, context: Any) -> dict:
         )
         logger.info(f"[{request_id}] bot token issued")
 
-        # Step 3: hand off to ECS BEFORE dial-out, so the bot is in
-        # the room and listening when the target picks up. There's a
-        # tiny race here — dialOut sends RING before bot fully joins
-        # — but Daily buffers the SIP leg until the room is live.
+        # Step 3: hand off to ECS. We pass dialout_settings (the
+        # phone number to ring + caller id) — the pipeline itself
+        # will call transport.start_dialout() after joining the
+        # room. Daily's dialOut mechanism only works from a
+        # connected SDK client (the bot in the room), NOT from a
+        # REST API call, so the Lambda can't initiate it.
         logger.info(
             f"[{request_id}] handing off to ECS "
             f"(agent_id={agent_id!r}, to=****{to_number[-4:]})"
@@ -388,10 +395,18 @@ def start_dial_out(event: dict, context: Any) -> dict:
             # path supplies the full Aurora config (including
             # first_message which is what the target hears on pickup).
             system_prompt=None,
-            # dialin_settings=None signals OUTBOUND in pipeline_ecs;
-            # the participant the pipeline waits for is the dial-out
-            # leg, not an inbound SIP session.
+            # dialin_settings=None signals OUTBOUND in pipeline_ecs.
             dialin_settings=None,
+            # dialout_settings tells the pipeline to call
+            # start_dialout() after joining; the bot will then ring
+            # the target from inside the room. caller_id is included
+            # only when supplied by the caller (Daily picks a default
+            # otherwise — typically a Daily-assigned number).
+            dialout_settings=(
+                {"phone_number": to_number, "caller_id": from_number}
+                if from_number
+                else {"phone_number": to_number}
+            ),
             agent_id=agent_id,
             case_data=case_data,
         )
@@ -405,37 +420,15 @@ def start_dial_out(event: dict, context: Any) -> dict:
                 f"Voice agent unavailable: {service_response.get('error', 'unknown')}",
             )
 
-        # Step 4: dialOut. Daily creates a SIP leg from the room out
-        # to the PSTN target, identifying as `from_number`.
         logger.info(
-            f"[{request_id}] dialing target ****{to_number[-4:]} "
-            f"from ****{from_number[-4:]}"
-        )
-        try:
-            dial_response = daily_client.dial_out(
-                room_name=room_name,
-                phone_number=to_number,
-                caller_id=from_number,
-            )
-        except ValueError as exc:
-            # dialOut failure means the call won't reach the target.
-            # The bot is in the room but nobody's coming. Best to
-            # tell the caller so they can retry / mark failed.
-            logger.error(f"[{request_id}] dialOut failed: {exc}")
-            return _error_response(
-                503,
-                f"Daily dialOut failed: {exc}",
-            )
-
-        logger.info(
-            f"[{request_id}] dial-out complete; pipeline session={session_id}"
+            f"[{request_id}] outbound session handed off; "
+            f"pipeline will dial out from inside the room"
         )
         return _success_response(
             200,
             {
                 "session_id": session_id,
                 "room_url": room_url,
-                "dial_out": dial_response,
                 "status": "started",
             },
         )
