@@ -66,6 +66,30 @@ class TestSourceReferences:
                 f"{const} should be a module-level env-var-overridable float"
             )
 
+    def test_smart_turn_constant_defined(self):
+        src = Path(__file__).parent.parent / "app" / "pipeline_ecs.py"
+        text = src.read_text()
+        assert "SMART_TURN_STOP_SECS = float(os.getenv(" in text
+
+    def test_user_turn_strategies_explicitly_constructed(self):
+        # Pipecat 0.0.108's default strategy bundle includes
+        # TranscriptionUserTurnStartStrategy + LocalSmartTurnAnalyzerV3
+        # with stop_secs=3.0. Both are problematic on phone audio with
+        # Deepgram (see fix commit). The fix EXPLICITLY constructs:
+        #   start=[VADUserTurnStartStrategy()],
+        #   stop=[TurnAnalyzerUserTurnStopStrategy(...)]
+        # and a custom-tuned LocalSmartTurnAnalyzerV3 with stop_secs
+        # from SMART_TURN_STOP_SECS. Source-grep so an accidental
+        # revert of any of these regresses the fix.
+        src = Path(__file__).parent.parent / "app" / "pipeline_ecs.py"
+        text = src.read_text()
+        assert "VADUserTurnStartStrategy()" in text
+        assert "TurnAnalyzerUserTurnStopStrategy(" in text
+        assert "LocalSmartTurnAnalyzerV3(" in text
+        assert "stop_secs=SMART_TURN_STOP_SECS" in text
+        # And LLMUserAggregatorParams must receive both knobs.
+        assert "user_turn_strategies=user_turn_strategies" in text
+
 
 # =============================================================================
 # Constant-reload tests — need pipecat's audio/vad submodules
