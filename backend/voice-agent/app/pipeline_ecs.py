@@ -140,6 +140,25 @@ def _get_enable_conversation_logging() -> bool:
     return cfg.features.enable_conversation_logging
 
 
+# ─── VAD tuning ────────────────────────────────────────────────────────────
+#
+# Default values match OG voiceagent (core/pipeline.py:67-74). Pre-fix the
+# fork relied on pipecat's defaults (min_volume=0.6, confidence=0.7,
+# start_secs=0.2, stop_secs=0.2 with a fork-set stop_secs=0.3) which let
+# acoustic-echo-from-bot's-own-TTS trigger false barge-ins on phone calls.
+# 2026-04-27 diagnostic on session voice-3cf5f828… showed 4 such barge-ins
+# in a 100s call, all chopping bot mid-sentence ~1s after start.
+#
+# OG's 0.75 min_volume threshold filters out the residual echo signal that
+# survives the carrier's cancellation, while still admitting deliberate
+# user speech. Each is overridable via env var so per-deploy or per-agent
+# tuning works without a redeploy.
+VAD_MIN_VOLUME = float(os.getenv("VAD_MIN_VOLUME", "0.75"))
+VAD_CONFIDENCE = float(os.getenv("VAD_CONFIDENCE", "0.7"))
+VAD_START_SECS = float(os.getenv("VAD_START_SECS", "0.2"))
+VAD_STOP_SECS = float(os.getenv("VAD_STOP_SECS", "0.2"))
+
+
 def _get_llm_model_id() -> str:
     """Get LLM model ID from config."""
     cfg = _get_config()
@@ -333,10 +352,25 @@ async def create_voice_pipeline(
 
     # VAD analyzer is configured on LLMUserAggregatorParams (not DailyParams)
     # since pipecat v0.0.101 deprecated the transport-level vad_analyzer param.
+    #
+    # All four VAD tuning knobs (min_volume / confidence / start_secs /
+    # stop_secs) are set explicitly using module-level constants so we
+    # don't inherit pipecat defaults that don't match phone-audio
+    # characteristics. See module-level VAD_* constants for rationale.
     vad_analyzer = SileroVADAnalyzer(
         params=VADParams(
-            stop_secs=0.3,  # Slightly longer pause for natural conversation
+            confidence=VAD_CONFIDENCE,
+            start_secs=VAD_START_SECS,
+            stop_secs=VAD_STOP_SECS,
+            min_volume=VAD_MIN_VOLUME,
         )
+    )
+    logger.info(
+        "vad_analyzer_configured",
+        min_volume=VAD_MIN_VOLUME,
+        confidence=VAD_CONFIDENCE,
+        start_secs=VAD_START_SECS,
+        stop_secs=VAD_STOP_SECS,
     )
 
     transport = DailyTransport(
