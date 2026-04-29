@@ -96,6 +96,11 @@ class CallRecord:
     batch_id: Optional[str] = None
     batch_row_index: Optional[int] = None
 
+    # Daily-side correlation (Phase 7E PR 3 — recording webhook)
+    # Mirrors the Daily room name; the recording webhook uses this
+    # to find the row to patch recording_path on.
+    session_id: Optional[str] = None
+
     def to_lambda_body(self) -> Dict[str, Any]:
         """Serialize to the JSON shape Lambda's ``POST /api/calls``
         upsert handler expects."""
@@ -125,6 +130,7 @@ class CallRecord:
             "error": self.error,
             "batch_id": self.batch_id,
             "batch_row_index": self.batch_row_index,
+            "session_id": self.session_id,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         return body
