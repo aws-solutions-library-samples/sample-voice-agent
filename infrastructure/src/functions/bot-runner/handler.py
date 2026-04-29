@@ -82,6 +82,13 @@ def route(event: dict, context: Any) -> dict:
     if raw_path.endswith("/dial-out") or invocation_type == "dial_out":
         return start_dial_out(event, context)
 
+    # Phase 7E PR 3: Daily recording webhook. Daily POSTs here when a
+    # recording finishes uploading to our S3 bucket. The handler is
+    # idempotent and never triggers a call — strictly an after-call
+    # PATCH of voice_calls.recording_path.
+    if raw_path.endswith("/recording-webhook") or invocation_type == "recording_webhook":
+        return recording_webhook(event, context)
+
     # Default: inbound webhook. Includes /start and any unrecognized
     # path so existing callers don't break.
     return start_session(event, context)
@@ -169,13 +176,18 @@ def start_session(event: dict, context: Any) -> dict:
         logger.info(f"[{request_id}] Created session_id: {session_id}")
 
         # Step 1: Create Daily room with SIP enabled
+        # Phase 7E PR 3: enable_recording="cloud-audio-only" — server-
+        # side audio-only m4a recording uploaded to our S3 bucket. The
+        # bot's meeting token below has start_cloud_recording=True so
+        # Daily auto-starts the recorder when the bot joins the room
+        # (no daily-js call needed from the pipeline).
         logger.info(f"[{request_id}] Creating Daily room")
         room = daily_client.create_room(
             name=f"voice-{call_id}",
             properties={
                 "enable_chat": False,
                 "enable_screenshare": False,
-                "enable_recording": False,
+                "enable_recording": "cloud-audio-only",
                 "enable_transcription": False,
                 "sip": {
                     "display_name": "Voice Assistant",
@@ -199,6 +211,7 @@ def start_session(event: dict, context: Any) -> dict:
                 "enable_screenshare": False,
                 "start_video_off": True,
                 "start_audio_off": False,
+                "start_cloud_recording": True,
                 "exp": int(time.time()) + 3600,  # 1 hour from now
             },
         )
@@ -349,12 +362,15 @@ def start_dial_out(event: dict, context: Any) -> dict:
         # here even for outbound calls; the room never actually
         # receives an inbound SIP leg, only the dialOut bridge.
         logger.info(f"[{request_id}] creating outbound Daily room")
+        # Phase 7E PR 3: enable_recording matches the inbound path —
+        # cloud-audio-only m4a uploaded to our S3 bucket. Auto-start
+        # is set on the bot's meeting token below.
         room = daily_client.create_room(
             name=f"voice-out-{uuid.uuid4().hex[:12]}",
             properties={
                 "enable_chat": False,
                 "enable_screenshare": False,
-                "enable_recording": False,
+                "enable_recording": "cloud-audio-only",
                 "enable_transcription": False,
                 "sip": {
                     "display_name": "Voice Assistant",
@@ -370,6 +386,8 @@ def start_dial_out(event: dict, context: Any) -> dict:
 
         # Step 2: bot meeting token (owner — Daily's dialOut requires
         # owner privilege to initiate from the bot's connection).
+        # Phase 7E PR 3: start_cloud_recording auto-starts the recorder
+        # when the bot joins. Same shape as the inbound + SIP paths.
         bot_token = daily_client.create_meeting_token(
             room_name=room_name,
             properties={
@@ -378,6 +396,7 @@ def start_dial_out(event: dict, context: Any) -> dict:
                 "enable_screenshare": False,
                 "start_video_off": True,
                 "start_audio_off": False,
+                "start_cloud_recording": True,
                 "exp": int(time.time()) + 3600,
             },
         )
@@ -475,13 +494,15 @@ def _handle_sip_request(body: dict, request_id: str) -> dict:
         logger.info(f"[{request_id}] Created session_id: {session_id}")
 
         # Step 1: Create Daily room with SIP enabled (no pinless dial-in)
+        # Phase 7E PR 3: cloud-audio-only recording on every call,
+        # matching the PSTN + dial-out paths.
         logger.info(f"[{request_id}] Creating Daily room for SIP")
         room = daily_client.create_room(
             name=f"sip-{session_id}",
             properties={
                 "enable_chat": False,
                 "enable_screenshare": False,
-                "enable_recording": False,
+                "enable_recording": "cloud-audio-only",
                 "enable_transcription": False,
                 "sip": {
                     "display_name": "Voice Assistant",
@@ -505,6 +526,7 @@ def _handle_sip_request(body: dict, request_id: str) -> dict:
                 "enable_screenshare": False,
                 "start_video_off": True,
                 "start_audio_off": False,
+                "start_cloud_recording": True,
                 "exp": int(time.time()) + 3600,  # 1 hour from now
             },
         )
@@ -644,6 +666,170 @@ Tool Usage:
 - Do NOT say "Let me..." or "I'll use..." before calling a tool
 
 The caller is reaching you via phone. Greet them warmly and ask how you can help."""
+
+
+def recording_webhook(event: dict, context: Any) -> dict:
+    """
+    Phase 7E PR 3: Daily cloud-recording webhook receiver.
+
+    Daily POSTs here when one of two events fires for a recording:
+
+      * ``recording.ready-to-download`` — fired when the recording has
+        finished and the m4a file has been written to our S3 bucket.
+        Payload includes ``room_name`` (= our session_id), ``s3_key``,
+        ``duration``, ``recording_id``. We patch
+        ``voice_calls.recording_path`` via a single round-trip to the
+        voice-api Lambda's ``POST /api/calls/recording-update``.
+
+      * ``recording.error`` — Daily failed to record (transient cloud
+        issue, S3 permissions blip, etc.). We log + ack but don't
+        update the row. Operators check CloudWatch and Daily's
+        recording dashboard if the call had no recording_path after
+        completing.
+
+    HMAC verification: deferred. The pinless_dialin signing scheme is
+    a known parked tech-debt item (PR #29 era); same applies here.
+    Daily's IP allowlist + the lookup-by-session-id design (rejects
+    rows we don't own) form the temporary backstop. When we resolve
+    HMAC for inbound, the same scheme applies here.
+
+    Idempotent: Daily can re-deliver the same event after a 5xx
+    response; our ``UPDATE ... WHERE session_id = ...`` is naturally
+    idempotent on the recording_path column.
+
+    Always returns 200 to Daily on bad payloads / unknown sessions —
+    a 4xx would prompt Daily to retry indefinitely; logging is more
+    useful here.
+    """
+    request_id = context.aws_request_id if context else str(uuid.uuid4())
+    logger.info(f"[{request_id}] recording webhook received")
+
+    try:
+        body = _parse_body(event)
+    except ValueError as exc:
+        logger.warning(f"[{request_id}] malformed body: {exc}")
+        return _success_response(200, {"status": "ignored", "reason": "bad_body"})
+
+    event_type = body.get("type") or "unknown"
+    payload = body.get("payload") or {}
+
+    # Daily's webhook envelope: { version, type, id, payload, event_ts }.
+    # Some integrations send a flat shape { recording_id, room_name, ... }
+    # — accept both for robustness.
+    if not payload and "room_name" in body:
+        payload = body
+
+    room_name = payload.get("room_name")
+    s3_key = payload.get("s3_key")
+    recording_id = payload.get("recording_id")
+    duration = payload.get("duration")
+
+    log_extra = {
+        "request_id": request_id,
+        "type": event_type,
+        "room_name": room_name,
+        "recording_id": recording_id,
+        "duration": duration,
+    }
+    logger.info(f"[{request_id}] event={event_type} {log_extra}")
+
+    if event_type == "recording.error":
+        # Daily reports an error. We don't have a recording to attach
+        # to the call; surface in logs for operator review and ack.
+        logger.error(
+            f"[{request_id}] Daily recording.error for room {room_name}: "
+            f"{payload.get('message') or payload}"
+        )
+        return _success_response(200, {"status": "logged"})
+
+    if event_type and event_type not in ("recording.ready-to-download",):
+        # Other event types (recording.started, etc.) — ack and ignore.
+        logger.info(f"[{request_id}] event {event_type} not handled, ack'd")
+        return _success_response(200, {"status": "ignored", "type": event_type})
+
+    if not room_name or not s3_key:
+        logger.warning(
+            f"[{request_id}] missing room_name or s3_key in payload: {payload}"
+        )
+        return _success_response(
+            200, {"status": "ignored", "reason": "missing_fields"}
+        )
+
+    # PATCH voice_calls via the voice-api Lambda. We never raise on
+    # failure: the recording is already in S3 and CloudWatch logs hold
+    # the room_name + s3_key for manual recovery if needed.
+    try:
+        _patch_recording_path(room_name, s3_key, request_id)
+    except Exception as exc:
+        # _patch_recording_path already logs; surface as 200 to Daily
+        # so they don't keep retrying — we'd rather investigate via
+        # CloudWatch than have Daily DDOS our Lambda on a transient.
+        logger.warning(
+            f"[{request_id}] recording_path patch failed (acking anyway): {exc}"
+        )
+
+    return _success_response(
+        200,
+        {
+            "status": "ok",
+            "room_name": room_name,
+            "s3_key": s3_key,
+        },
+    )
+
+
+def _patch_recording_path(room_name: str, s3_key: str, request_id: str) -> None:
+    """Invoke the voice-api Lambda to patch voice_calls.recording_path.
+
+    Mirrors phone_resolver.py's invoke pattern — synchronous boto3 via
+    asyncio.to_thread is not needed here since the bot-runner Lambda
+    is already running synchronously in the request thread.
+    """
+    import boto3  # local import keeps cold-start lean
+
+    voice_api = os.environ.get("VOICE_API_LAMBDA_NAME", "").strip()
+    if not voice_api:
+        logger.warning(
+            f"[{request_id}] VOICE_API_LAMBDA_NAME not set; skipping patch"
+        )
+        return
+
+    client = boto3.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    payload = {
+        "httpMethod": "POST",
+        "path": "/api/calls/recording-update",
+        "queryStringParameters": {},
+        "headers": {"content-type": "application/json"},
+        "body": json.dumps(
+            {
+                "session_id": room_name,
+                "recording_path": s3_key,
+            }
+        ),
+    }
+    response = client.invoke(
+        FunctionName=voice_api,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(payload).encode("utf-8"),
+    )
+    raw = response.get("Payload")
+    parsed = json.loads(raw.read().decode("utf-8")) if raw else {}
+    status_code = parsed.get("statusCode")
+    if status_code == 200:
+        logger.info(
+            f"[{request_id}] recording_path patched: room={room_name} s3_key={s3_key}"
+        )
+    elif status_code == 404:
+        logger.warning(
+            f"[{request_id}] no voice_calls row for session_id={room_name} "
+            f"(call wrote terminal status before recording finished, "
+            f"or Daily room_name doesn't match our session_id)"
+        )
+    else:
+        logger.warning(
+            f"[{request_id}] recording_path patch unexpected response "
+            f"status={status_code} body={parsed.get('body')}"
+        )
 
 
 def _success_response(status_code: int, body: dict) -> dict:

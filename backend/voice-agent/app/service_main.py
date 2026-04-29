@@ -630,6 +630,11 @@ class PipelineManager:
                     error=call_error,
                     batch_id=cfg_batch_id,
                     batch_row_index=cfg_batch_row_index,
+                    # Phase 7E PR 3: session_id is the Daily room name —
+                    # the recording webhook arrives with this as
+                    # `room_name` and the Lambda looks up the row to
+                    # patch `recording_path` on.
+                    session_id=session_id,
                 )
                 first_write_ok = await write_call_record(record)
 

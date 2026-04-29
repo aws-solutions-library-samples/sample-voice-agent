@@ -185,6 +185,16 @@ export class WebhookApiConstruct extends Construct {
     const dialOutResource = this.api.root.addResource('dial-out');
     dialOutResource.addMethod('POST', new apigateway.LambdaIntegration(this.botRunnerFunction));
 
+    // POST /recording-webhook — Phase 7E PR 3 Daily recording event
+    // receiver. Daily POSTs here for `recording.ready-to-download`
+    // and `recording.error` events. No HMAC verification today (same
+    // parked tech-debt item as the inbound /start path); we rely on
+    // Daily's IP allowlist + lookup-by-session-id to reject events
+    // for rooms we don't own. The handler always 200s to keep Daily
+    // from retrying — bad payloads are logged.
+    const recordingWebhookResource = this.api.root.addResource('recording-webhook');
+    recordingWebhookResource.addMethod('POST', new apigateway.LambdaIntegration(this.botRunnerFunction));
+
     this.apiEndpoint = `${this.api.url}start`;
 
     // Store outputs in SSM Parameters
@@ -200,6 +210,15 @@ export class WebhookApiConstruct extends Construct {
       parameterName: '/voice-agent/botrunner/dial-out-url',
       stringValue: `${this.api.url}dial-out`,
       description: 'Voice Agent outbound dialing endpoint',
+    });
+
+    // Phase 7E PR 3: recording webhook URL → SSM so the Daily
+    // bootstrap script (or operators) can register this URL with
+    // Daily's POST /v1/webhooks endpoint without hardcoding.
+    new ssm.StringParameter(this, 'RecordingWebhookUrlParam', {
+      parameterName: '/voice-agent/botrunner/recording-webhook-url',
+      stringValue: `${this.api.url}recording-webhook`,
+      description: 'Voice Agent Daily recording webhook receiver',
     });
   }
 }
