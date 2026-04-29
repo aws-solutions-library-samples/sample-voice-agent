@@ -1,15 +1,23 @@
-"""Regression test for VAD tuning. Phase 7E follow-up.
+"""Regression test for VAD tuning.
 
-Pre-fix the fork only set ``stop_secs=0.3`` on SileroVADAnalyzer and
-inherited every other VADParams default from pipecat (min_volume=0.6
-in particular). On phone calls, residual acoustic echo from the bot's
-own TTS frequently passed the 0.6 threshold and triggered false
-barge-ins — observed 4 in a single 100s test call on 2026-04-27.
+Pins the four module-level VAD_* constants to Pipecat's reference
+defaults (also what AWS sample-voice-agent ships with), so accidental
+drift can't sneak in.
 
-This test pins the four module-level VAD_* constants to the OG
-voiceagent values so accidental drift back to pipecat defaults can't
-sneak in. Each constant has an env-var override so production tuning
+Each constant has an env-var override so per-environment tuning
 happens via ECS task-def env vars, not code edits.
+
+History pinned by these tests (defaults reflect the post-2026-04-29
+hotfix):
+
+  * Pipecat / AWS reference defaults: min_volume=0.6, confidence=0.7,
+    start_secs=0.2, stop_secs=0.2.
+  * 2026-04-27 (PR #28): we tried OG voiceagent's 0.75 min_volume to
+    fix acoustic-echo barge-in. Worked on Twilio audio path.
+  * 2026-04-29 hotfix: reverted to 0.6 after Daily SIP dial-in test
+    call 198a6c77 / session voice-e5f9108c… proved 0.75 is too high
+    for Daily's normalized audio levels — turn 2+ user speech was
+    silently dropped (Deepgram heard it, VAD didn't fire).
 
 Two test classes:
 
@@ -128,9 +136,15 @@ class TestVADBehavior:
     # ── Defaults ──────────────────────────────────────────────────────
 
     def test_min_volume_default(self):
+        # 2026-04-29 hotfix: reverted from OG voiceagent's 0.75 (which
+        # was tuned for Twilio PSTN audio) to Pipecat's default 0.6.
+        # Daily SIP dial-in audio normalizes ~-53 dB RMS, well below
+        # the 0.75 threshold; turn 2+ user speech was being silently
+        # dropped by Silero VAD even though Deepgram heard it. See
+        # call 198a6c77 / session voice-e5f9108c… for the repro.
         os.environ.pop("VAD_MIN_VOLUME", None)
         mod = _reload()
-        assert mod.VAD_MIN_VOLUME == 0.75
+        assert mod.VAD_MIN_VOLUME == 0.6
 
     def test_confidence_default(self):
         os.environ.pop("VAD_CONFIDENCE", None)

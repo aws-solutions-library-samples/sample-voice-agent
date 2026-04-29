@@ -147,18 +147,40 @@ def _get_enable_conversation_logging() -> bool:
 
 # ─── VAD tuning ────────────────────────────────────────────────────────────
 #
-# Default values match OG voiceagent (core/pipeline.py:67-74). Pre-fix the
-# fork relied on pipecat's defaults (min_volume=0.6, confidence=0.7,
-# start_secs=0.2, stop_secs=0.2 with a fork-set stop_secs=0.3) which let
-# acoustic-echo-from-bot's-own-TTS trigger false barge-ins on phone calls.
-# 2026-04-27 diagnostic on session voice-3cf5f828… showed 4 such barge-ins
-# in a 100s call, all chopping bot mid-sentence ~1s after start.
+# Defaults match Pipecat's reference defaults (also what AWS's
+# sample-voice-agent reference repo ships with) after the 2026-04-29
+# regression below.
 #
-# OG's 0.75 min_volume threshold filters out the residual echo signal that
-# survives the carrier's cancellation, while still admitting deliberate
-# user speech. Each is overridable via env var so per-deploy or per-agent
-# tuning works without a redeploy.
-VAD_MIN_VOLUME = float(os.getenv("VAD_MIN_VOLUME", "0.75"))
+# History:
+#
+#   * Pipecat default: min_volume=0.6, confidence=0.7, start_secs=0.2,
+#     stop_secs=0.2.
+#   * Fork pre-2026-04-27: drifted to stop_secs=0.3 → caused a smart-
+#     turn-analyzer compatibility warning + 9-second mid-call stalls.
+#   * 2026-04-27 (PR #28): raised min_volume to 0.75 to match OG
+#     voiceagent's Twilio-tuned config and stop acoustic-echo barge-in
+#     (residual TTS bleed-through triggering false user turns). Worked
+#     for a few test calls; we used Twilio audio path historically.
+#   * 2026-04-29 17:20 UTC (call 198a6c77 / session voice-e5f9108c…):
+#     min_volume=0.75 broke turn detection on Daily SIP dial-in. Daily
+#     PSTN audio normalizes to ~-53 dB RMS — well below 0.75 threshold.
+#     Bot answered turn 1 (where Alex spoke loudly) then silently
+#     dropped 3 subsequent user turns. Deepgram heard the user fine
+#     (transcripts produced); VAD never fired user_started_speaking
+#     so no LLM call → bot silent → user hung up at 40s.
+#
+# Reverting to Pipecat's 0.6 default. AWS sample-voice-agent ships
+# this value in production; if the broader Pipecat+Daily community
+# tolerates it, so do we. If acoustic-echo barge-ins return at 0.6,
+# the rollback path is `VAD_MIN_VOLUME=0.7` env var on the ECS task
+# (no redeploy). We do NOT go back to 0.75 — that's the value we
+# proved breaks turn detection on Daily.
+#
+# Long-term: Deepgram Flux migration removes Silero turn-detection
+# from the equation entirely (Phase 8 backlog top item).
+#
+# Each value remains env-overridable for per-environment tuning.
+VAD_MIN_VOLUME = float(os.getenv("VAD_MIN_VOLUME", "0.6"))
 VAD_CONFIDENCE = float(os.getenv("VAD_CONFIDENCE", "0.7"))
 VAD_START_SECS = float(os.getenv("VAD_START_SECS", "0.2"))
 VAD_STOP_SECS = float(os.getenv("VAD_STOP_SECS", "0.2"))
