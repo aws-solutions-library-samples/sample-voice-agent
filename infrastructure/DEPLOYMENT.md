@@ -48,7 +48,8 @@ This mode uses Deepgram and Cartesia cloud APIs for STT/TTS. No SageMaker endpoi
 
 You will need API keys for:
 - **[Deepgram](https://console.deepgram.com/)** -- Speech-to-Text (Nova-3 model)
-- **[Cartesia](https://play.cartesia.ai/)** -- Text-to-Speech (Sonic model)
+- **[Cartesia](https://play.cartesia.ai/)** -- Text-to-Speech (Sonic model) *(default)*
+- **[ElevenLabs](https://elevenlabs.io/)** -- Text-to-Speech (Turbo v2.5 model) *(alternative — set `TTS_PROVIDER=elevenlabs`)*
 
 ### Step 1: Configure Environment
 
@@ -90,6 +91,9 @@ cat > ../backend/voice-agent/.env << 'EOF'
 DEEPGRAM_API_KEY=your-deepgram-api-key
 CARTESIA_API_KEY=your-cartesia-api-key
 DAILY_API_KEY=your-daily-api-key
+# Optional: Use ElevenLabs instead of Cartesia for TTS
+# TTS_PROVIDER=elevenlabs
+# ELEVENLABS_API_KEY=your-elevenlabs-api-key
 EOF
 
 # Push to Secrets Manager
@@ -446,7 +450,8 @@ cd infrastructure
 | Bedrock Claude Haiku | Yes (pay-per-use) | Yes (pay-per-use) |
 | Daily.co | Yes (third-party) | Yes (third-party) |
 | Deepgram Cloud STT | Yes (third-party) | No (self-hosted) |
-| Cartesia Cloud TTS | Yes (third-party) | No (self-hosted) |
+| Cartesia Cloud TTS | Yes (third-party, default) | No (self-hosted) |
+| ElevenLabs Cloud TTS | Yes (third-party, alternative) | No (self-hosted) |
 
 **Cloud API mode** does not deploy SageMaker endpoints but routes audio through the public internet. **SageMaker mode** keeps all audio within your VPC.
 
