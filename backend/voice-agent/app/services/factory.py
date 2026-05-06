@@ -146,7 +146,7 @@ def create_tts_service(config: "PipelineConfig"):
             )
 
         voice_id = _map_voice_id_to_elevenlabs(config.voice_id)
-        model = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+        model = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 
         logger.info(
             "tts_provider_selected",

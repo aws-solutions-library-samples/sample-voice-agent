@@ -49,7 +49,7 @@ This mode uses Deepgram and Cartesia cloud APIs for STT/TTS. No SageMaker endpoi
 You will need API keys for:
 - **[Deepgram](https://console.deepgram.com/)** -- Speech-to-Text (Nova-3 model)
 - **[Cartesia](https://play.cartesia.ai/)** -- Text-to-Speech (Sonic model) *(default)*
-- **[ElevenLabs](https://elevenlabs.io/)** -- Text-to-Speech (Turbo v2.5 model) *(alternative — set `TTS_PROVIDER=elevenlabs`)*
+- **[ElevenLabs](https://elevenlabs.io/)** -- Text-to-Speech (Multilingual v2 model) *(alternative — set `TTS_PROVIDER=elevenlabs`)*
 
 ### Step 1: Configure Environment
 
