@@ -29,7 +29,10 @@ class KnowledgeBaseConfig:
 
 @dataclass
 class ProviderConfig:
-    """Provider configuration for STT/TTS."""
+    """Provider configuration for STT/TTS.
+
+    Supported TTS providers: "cartesia", "elevenlabs", "sagemaker"
+    """
 
     stt_provider: str = "deepgram"
     tts_provider: str = "cartesia"

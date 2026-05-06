@@ -3,7 +3,7 @@ Service factory for STT and TTS providers.
 
 Supports switching between cloud APIs and SageMaker endpoints via configuration:
 - STT_PROVIDER: "deepgram" (default, cloud API) or "sagemaker" (Deepgram on SageMaker)
-- TTS_PROVIDER: "cartesia" (default, cloud API) or "sagemaker" (Deepgram Aura on SageMaker)
+- TTS_PROVIDER: "cartesia" (default, cloud API), "elevenlabs", or "sagemaker" (Deepgram Aura on SageMaker)
 
 Cloud APIs are the default for simpler deployment without SageMaker endpoints.
 SageMaker providers use HTTP/2 bidirectional streaming for low-latency, VPC-local inference.
@@ -136,6 +136,31 @@ def create_tts_service(config: "PipelineConfig"):
             encoding="linear16",
         )
 
+    elif provider == "elevenlabs":
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "ELEVENLABS_API_KEY environment variable required for TTS"
+            )
+
+        voice_id = _map_voice_id_to_elevenlabs(config.voice_id)
+        model = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+
+        logger.info(
+            "tts_provider_selected",
+            provider="elevenlabs",
+            voice_id=voice_id,
+            model=model,
+        )
+        return ElevenLabsTTSService(
+            api_key=api_key,
+            voice_id=voice_id,
+            model=model,
+            sample_rate=8000,
+        )
+
     else:
         # Default to Cartesia cloud API
         from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -189,6 +214,56 @@ def _resolve_voice_for_sagemaker(voice_id: str | None) -> str:
     }
 
     return cartesia_to_deepgram.get(voice_id, default_voice)
+
+
+def _map_voice_id_to_elevenlabs(voice_id: str | None) -> str:
+    """
+    Map voice IDs to ElevenLabs format.
+
+    If it's already an ElevenLabs voice ID, returns it directly.
+    If it's a Cartesia UUID or Deepgram Aura name, maps to a similar ElevenLabs voice.
+
+    Args:
+        voice_id: Voice ID from any provider
+
+    Returns:
+        ElevenLabs voice ID
+    """
+    # Default ElevenLabs voice (Rachel - clear female voice)
+    default_voice = "21m00Tcm4TlvDq8ikWAM"
+
+    if not voice_id:
+        return default_voice
+
+    # If it's not a Cartesia UUID or Deepgram name, assume it's already an ElevenLabs ID
+    is_cartesia_uuid = len(voice_id) == 36 and voice_id.count("-") == 4
+    is_deepgram_name = voice_id.startswith("aura")
+
+    if not is_cartesia_uuid and not is_deepgram_name:
+        return voice_id
+
+    # Map Cartesia UUIDs to ElevenLabs equivalents
+    cartesia_to_elevenlabs = {
+        "79a125e8-cd45-4c13-8a67-188112f4dd22": "21m00Tcm4TlvDq8ikWAM",  # British Lady -> Rachel
+        "b7d50908-b17c-442d-ad8d-810c63997ed9": "EXAVITQu4vr4xnSDxMaL",  # California Girl -> Bella
+        "5345cf08-6f37-424d-a5d9-8ae1101b9377": "MF3mGyEYCl7XYWbV9V6O",  # Sweet Lady -> Emily
+        "a0e99841-438c-4a64-b679-ae501e7d6091": "VR6AewLTigWG4xSOukaG",  # Barbershop Man -> Arnold
+        "fb26447f-308b-471e-8b00-8e9f04284eb5": "ErXwobaYiN019PkySvjV",  # Doctor Mischief -> Antoni
+    }
+
+    if is_cartesia_uuid:
+        return cartesia_to_elevenlabs.get(voice_id, default_voice)
+
+    # Map Deepgram Aura voices to ElevenLabs equivalents
+    deepgram_to_elevenlabs = {
+        "aura-2-thalia-en": "21m00Tcm4TlvDq8ikWAM",  # Thalia -> Rachel
+        "aura-2-luna-en": "EXAVITQu4vr4xnSDxMaL",  # Luna -> Bella
+        "aura-2-asteria-en": "MF3mGyEYCl7XYWbV9V6O",  # Asteria -> Emily
+        "aura-2-arcas-en": "VR6AewLTigWG4xSOukaG",  # Arcas -> Arnold
+        "aura-2-orpheus-en": "ErXwobaYiN019PkySvjV",  # Orpheus -> Antoni
+    }
+
+    return deepgram_to_elevenlabs.get(voice_id, default_voice)
 
 
 def _map_voice_id_to_cartesia(voice_id: str | None) -> str:

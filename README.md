@@ -159,7 +159,7 @@ The following third-party service accounts and API keys are required:
 | ------- | ------- | ------- |
 | [Daily.co](https://dashboard.daily.co/) | WebRTC/SIP transport for voice calls | [Dashboard](https://dashboard.daily.co/) |
 | STT provider (e.g. [Deepgram](https://console.deepgram.com/)) | Speech-to-text (cloud API mode) | Provider console |
-| TTS provider (e.g. [Cartesia](https://play.cartesia.ai/)) | Text-to-speech (cloud API mode) | Provider console |
+| TTS provider (e.g. [Cartesia](https://play.cartesia.ai/) or [ElevenLabs](https://elevenlabs.io/)) | Text-to-speech (cloud API mode) | Provider console |
 
 ### AWS Account Requirements
 
@@ -421,10 +421,10 @@ Run `/destroy-project` in Claude Code. This will:
 
 | Mode | STT/TTS | Best For |
 | ---- | ------- | -------- |
-| **Cloud API** (`USE_CLOUD_APIS=true`) | Deepgram + Cartesia cloud APIs | Getting started, development |
+| **Cloud API** (`USE_CLOUD_APIS=true`) | Deepgram + Cartesia/ElevenLabs cloud APIs | Getting started, development |
 | **Amazon SageMaker** (default) | Self-hosted on GPU instances | Production, data residency |
 
-Cloud API mode requires Deepgram and Cartesia API keys. Amazon SageMaker mode requires [Deepgram Marketplace subscriptions](docs/reference/deepgram-marketplace-setup.md) and GPU quota.
+Cloud API mode requires Deepgram and a TTS provider API key (Cartesia by default, or ElevenLabs with `TTS_PROVIDER=elevenlabs`). Amazon SageMaker mode requires [Deepgram Marketplace subscriptions](docs/reference/deepgram-marketplace-setup.md) and GPU quota.
 
 ### Known Issues
 
