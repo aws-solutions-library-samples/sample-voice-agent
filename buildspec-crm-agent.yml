@@ -1,0 +1,32 @@
+version: 0.2
+
+# CodeBuild buildspec for building and pushing crm-agent container
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo Building crm-agent with image tag $IMAGE_TAG
+
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image for crm-agent...
+      - cd backend/agents/crm-agent
+      - docker build -t $ECR_REPOSITORY:crm-agent-$IMAGE_TAG .
+      - docker tag $ECR_REPOSITORY:crm-agent-$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:crm-agent-$IMAGE_TAG
+      - docker tag $ECR_REPOSITORY:crm-agent-$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:crm-agent-latest
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images...
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:crm-agent-$IMAGE_TAG
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:crm-agent-latest
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
