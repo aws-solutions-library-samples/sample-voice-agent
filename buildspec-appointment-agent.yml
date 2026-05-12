@@ -13,15 +13,15 @@ phases:
     commands:
       - echo Build started on `date`
       - cd backend/agents/appointment-agent
-      - docker build -t appointment-agent:$IMAGE_TAG .
-      - docker tag appointment-agent:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-      - docker tag appointment-agent:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      - docker build -t appointment-agent .
+      - docker tag appointment-agent $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-$IMAGE_TAG
+      - docker tag appointment-agent $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-latest
 
   post_build:
     commands:
       - echo Pushing the Docker images...
-      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-$IMAGE_TAG
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-latest
 
 env:
   variables:

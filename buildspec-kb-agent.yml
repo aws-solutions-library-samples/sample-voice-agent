@@ -13,15 +13,15 @@ phases:
     commands:
       - echo Build started on `date`
       - cd backend/agents/knowledge-base-agent
-      - docker build -t kb-agent:$IMAGE_TAG .
-      - docker tag kb-agent:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-      - docker tag kb-agent:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      - docker build -t kb-agent .
+      - docker tag kb-agent $ECR_REGISTRY/$ECR_REPOSITORY:kb-agent-$IMAGE_TAG
+      - docker tag kb-agent $ECR_REGISTRY/$ECR_REPOSITORY:kb-agent-latest
 
   post_build:
     commands:
       - echo Pushing the Docker images...
-      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:kb-agent-$IMAGE_TAG
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:kb-agent-latest
 
 env:
   variables:
