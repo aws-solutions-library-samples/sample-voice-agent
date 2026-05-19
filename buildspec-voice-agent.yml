@@ -10,8 +10,8 @@ phases:
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
       - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
       - echo Building voice-agent with image tag $IMAGE_TAG
-      - echo Attempting to pull python base image to warm Docker cache...
-      - docker pull python:3.12-slim || echo "Docker pull failed, will try during build"
+      - echo Attempting to pull Amazon Linux base image to warm Docker cache...
+      - docker pull public.ecr.aws/amazonlinux/amazonlinux:2023 || echo "Docker pull failed, will try during build"
 
   build:
     commands:
