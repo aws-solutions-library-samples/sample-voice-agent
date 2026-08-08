@@ -28,7 +28,8 @@ class TestCartesiaSTTFactory:
     @patch("pipecat.services.cartesia.stt.CartesiaSTTService")
     def test_cartesia_provider_creates_stt_service(self, mock_stt_class):
         """STT_PROVIDER=cartesia should create CartesiaSTTService with ink-whisper."""
-        mock_stt_class.Settings = MagicMock()
+        mock_settings_instance = MagicMock()
+        mock_stt_class.Settings = MagicMock(return_value=mock_settings_instance)
         mock_stt_class.return_value = MagicMock()
 
         from app.services.factory import create_stt_service
@@ -40,6 +41,10 @@ class TestCartesiaSTTFactory:
         call_kwargs = mock_stt_class.call_args[1]
         assert call_kwargs["api_key"] == "test-key-123"
         assert call_kwargs["sample_rate"] == 8000
+        assert call_kwargs["settings"] == mock_settings_instance
+        mock_stt_class.Settings.assert_called_once_with(
+            model="ink-whisper", language="en"
+        )
 
     @patch.dict(os.environ, {"CARTESIA_API_KEY": "test-key-456"})
     @patch("pipecat.services.cartesia.turns.stt.CartesiaTurnsSTTService")

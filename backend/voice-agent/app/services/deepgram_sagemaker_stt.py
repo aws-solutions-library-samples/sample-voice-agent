@@ -16,7 +16,7 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-from pipecat.services.deepgram.stt_sagemaker import (
+from pipecat.services.deepgram.sagemaker.stt import (
     DeepgramSageMakerSTTService as _BaseDeepgramSageMakerSTTService,
 )
 

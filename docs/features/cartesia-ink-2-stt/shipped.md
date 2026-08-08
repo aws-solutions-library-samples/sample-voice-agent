@@ -48,7 +48,7 @@ With `cartesia-turns`, Silero VAD is still present for interruption detection, b
 
 ## Dependencies
 
-- `pipecat-ai[cartesia]` >= 0.0.108 (includes CartesiaTurnsSTTService)
+- `pipecat-ai[cartesia]` >= 1.7.0 (includes CartesiaTurnsSTTService + keyterm support)
 - Cartesia API key with ink-2 model access
 
 ## Status
