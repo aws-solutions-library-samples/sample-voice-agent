@@ -223,11 +223,11 @@ See the [Deployment Guide](infrastructure/DEPLOYMENT.md) for full manual cleanup
 
 | Title | Description |
 | ----- | ----------- |
+| [Building real-time voice assistants with Amazon Nova Sonic](https://aws.amazon.com/blogs/machine-learning/building-real-time-voice-assistants-with-amazon-nova-sonic-compared-to-cascading-architectures/) | Speech-to-speech vs cascading architecture comparison |
+| [Build real-time voice applications with Amazon SageMaker AI and vLLM](https://aws.amazon.com/blogs/machine-learning/build-real-time-voice-applications-with-amazon-sagemaker-ai-and-vllm/) | Self-hosted STT/TTS on SageMaker with bidirectional HTTP/2 streaming |
 | [Building intelligent AI voice agents with Pipecat and Amazon Bedrock -- Part 1](https://aws.amazon.com/blogs/machine-learning/building-intelligent-ai-voice-agents-with-pipecat-and-amazon-bedrock-part-1/) | Cascaded architecture (STT → LLM → TTS), reference architectures, best practices |
 | [Building intelligent AI voice agents with Pipecat and Amazon Bedrock -- Part 2](https://aws.amazon.com/blogs/machine-learning/building-intelligent-ai-voice-agents-with-pipecat-and-amazon-bedrock-part-2/) | Unified speech-to-speech with Amazon Nova Sonic |
 | [Deploy voice agents with Pipecat and Amazon Bedrock AgentCore Runtime](https://aws.amazon.com/blogs/machine-learning/deploy-voice-agents-with-pipecat-and-amazon-bedrock-agentcore-runtime-part-1/) | Managed serverless deployment with WebSocket and WebRTC transport |
-| [Build real-time voice applications with Amazon SageMaker AI and vLLM](https://aws.amazon.com/blogs/machine-learning/build-real-time-voice-applications-with-amazon-sagemaker-ai-and-vllm/) | Self-hosted STT/TTS on SageMaker with bidirectional HTTP/2 streaming |
-| [Building real-time voice assistants with Amazon Nova Sonic](https://aws.amazon.com/blogs/machine-learning/building-real-time-voice-assistants-with-amazon-nova-sonic-compared-to-cascading-architectures/) | Bidirectional streaming vs cascading architecture comparison |
 | [Voice AI Benchmarks](https://wirjo.github.io/voice-ai-benchmarks/) | Community STT and LLM benchmarks for voice agent model selection |
 
 ## Revisions
