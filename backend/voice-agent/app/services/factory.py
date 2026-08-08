@@ -2,11 +2,12 @@
 Service factory for STT and TTS providers.
 
 Supports switching between cloud APIs and SageMaker endpoints via configuration:
-- STT_PROVIDER: "deepgram" (default, cloud API) or "sagemaker" (Deepgram on SageMaker)
+- STT_PROVIDER: "deepgram" (default), "cartesia", "cartesia-turns", or "sagemaker"
 - TTS_PROVIDER: "cartesia" (default, cloud API) or "sagemaker" (Deepgram Aura on SageMaker)
 
 Cloud APIs are the default for simpler deployment without SageMaker endpoints.
 SageMaker providers use HTTP/2 bidirectional streaming for low-latency, VPC-local inference.
+Cartesia STT uses WebSocket streaming to Cartesia's cloud API (ink-whisper or ink-2).
 """
 
 import os
@@ -27,6 +28,8 @@ def create_stt_service(config: "PipelineConfig"):
     Supports:
     - "deepgram": Cloud WebSocket API (requires DEEPGRAM_API_KEY)
     - "sagemaker": Pipecat's built-in DeepgramSageMakerSTTService using HTTP/2 BiDi streaming
+    - "cartesia": Cartesia ink-whisper via cloud WebSocket (requires CARTESIA_API_KEY)
+    - "cartesia-turns": Cartesia ink-2 with native turn detection (requires CARTESIA_API_KEY)
 
     Args:
         config: Pipeline configuration with provider, endpoint names, and region
@@ -39,7 +42,19 @@ def create_stt_service(config: "PipelineConfig"):
     """
     provider = config.stt_provider.lower()
 
-    if provider == "sagemaker":
+    if provider == "cartesia":
+        from app.services.cartesia_stt import create_cartesia_stt_service
+
+        logger.info("stt_provider_selected", provider="cartesia", model="ink-whisper")
+        return create_cartesia_stt_service(sample_rate=8000)
+
+    elif provider == "cartesia-turns":
+        from app.services.cartesia_stt import create_cartesia_turns_stt_service
+
+        logger.info("stt_provider_selected", provider="cartesia-turns", model="ink-2")
+        return create_cartesia_turns_stt_service(sample_rate=8000)
+
+    elif provider == "sagemaker":
         from app.services.deepgram_sagemaker_stt import DeepgramSageMakerSTTService
         from deepgram import LiveOptions
 
