@@ -38,11 +38,21 @@ git clone https://github.com/aws-samples/sample-voice-agent.git
 cd sample-voice-agent
 ```
 
-Open in Claude Code (or your preferred AI-assisted IDE) and run:
+Open in Claude Code (or your preferred AI-assisted IDE) and choose a deployment mode:
+
+**Cloud API mode** (quickest start -- uses Deepgram + Cartesia cloud APIs):
 
 1. **`/deploy-cloud-api`** -- Checks prerequisites, gathers API keys, deploys CDK stacks
 2. **`/configure-daily`** -- Sets up a phone number with PSTN dial-in
 3. **`/verify-deployment`** -- Health-checks all components
+
+**Amazon SageMaker mode** (production -- self-hosted STT/TTS, audio stays in VPC):
+
+1. **`/deploy-sagemaker`** -- Deploys CDK stacks with GPU-backed STT/TTS endpoints
+2. **`/configure-daily`** -- Sets up a phone number with PSTN dial-in
+3. **`/verify-deployment`** -- Health-checks all components
+
+> SageMaker mode requires GPU quota for `ml.g6.2xlarge` and `ml.g6.12xlarge` ([request via Service Quotas](https://console.aws.amazon.com/servicequotas/)) and [Deepgram Marketplace subscriptions](docs/reference/deepgram-marketplace-setup.md).
 
 You now have a callable phone number with a voice AI agent.
 
