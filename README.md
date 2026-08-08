@@ -223,8 +223,9 @@ See the [Deployment Guide](infrastructure/DEPLOYMENT.md) for full manual cleanup
 
 | Date | Description |
 | ---- | ----------- |
-| August 2026 | Deepgram Flux STT support as alternative provider (#18), README restructure for getting-started focus |
-| March 2026 | Initial release -- Cloud API and Amazon SageMaker deployment modes, A2A capability agents, auto-scaling |
+| August 2026 | Deepgram Flux STT support (#18), Cartesia Ink 2 STT, LLM model selection (Nemotron Super, GPT-5.6 Luna), README restructure |
+| May 2026 | ElevenLabs TTS provider support, architecture diagram update |
+| March 2026 | Initial release -- Cloud API and Amazon SageMaker deployment modes, local browser-based prototyping, A2A capability agents, auto-scaling, call flow visualizer, observability suite |
 
 ## Notices
 
