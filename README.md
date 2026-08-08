@@ -77,11 +77,13 @@ Speak into your microphone and hear the agent respond. All pipeline features (to
 
 ## Overview
 
+This Guidance focuses on a production-ready **cascading pipeline** (STT → LLM → TTS) using Pipecat on Amazon ECS Fargate with optional self-hosted STT/TTS on Amazon SageMaker AI. For additional samples covering **bidirectional streaming** (Nova Sonic speech-to-speech), other frameworks (Strands, LiveKit, LangChain), and managed deployment options (AgentCore Runtime), see [sample-voice-agent-on-aws](https://github.com/aws-samples/sample-voice-agent-on-aws).
+
 - **Flexible orchestration** -- [Pipecat](https://github.com/pipecat-ai/pipecat) open-source framework for voice AI pipelines
 - **Plug-in models** -- Supports multiple STT providers (Deepgram, Deepgram Flux, SageMaker-hosted), TTS providers (Cartesia, SageMaker-hosted), and LLMs (Amazon Bedrock)
 - **Phone and web** -- Daily SIP/PSTN dial-in and managed WebRTC
 - **Extensible agents** -- Agent-to-agent (A2A) hub-and-spoke architecture with AWS Cloud Map discovery
-- **AWS-native** -- Amazon ECS Fargate with auto-scaling, Amazon Bedrock for LLM, optional self-hosted STT/TTS on Amazon SageMaker
+- **AWS-native** -- Amazon ECS Fargate with auto-scaling, Amazon Bedrock for LLM, optional self-hosted STT/TTS on Amazon SageMaker AI
 
 ### Architecture
 
