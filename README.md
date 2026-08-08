@@ -156,6 +156,39 @@ npx cdk destroy --all --force
 
 See the [Deployment Guide](infrastructure/DEPLOYMENT.md) for full manual cleanup steps including Daily.co phone number release.
 
+## Project Structure
+
+```
+├── infrastructure/           # CDK infrastructure code
+│   ├── src/
+│   │   ├── stacks/          # CloudFormation stacks
+│   │   ├── constructs/      # Reusable CDK constructs
+│   │   └── functions/       # AWS Lambda function code
+│   ├── scripts/             # Deployment & setup scripts
+│   └── test/                # Infrastructure tests
+├── backend/
+│   ├── voice-agent/         # Voice pipeline container (hub)
+│   │   ├── app/
+│   │   │   ├── services/    # STT/TTS/LLM service factories
+│   │   │   ├── tools/       # Tool framework + built-in tools
+│   │   │   ├── a2a/         # A2A capability agent integration
+│   │   │   ├── pipeline_ecs.py   # Pipecat pipeline (Daily transport)
+│   │   │   ├── pipeline_local.py # Pipecat pipeline (SmallWebRTC transport)
+│   │   │   ├── local_main.py     # Local prototyping entry point
+│   │   │   ├── observability.py  # Metrics observers
+│   │   │   └── service_main.py   # HTTP service (aiohttp)
+│   │   ├── tests/           # Python tests
+│   │   └── Dockerfile       # Container definition (Python 3.12)
+│   └── agents/              # A2A capability agents (spokes)
+│       ├── knowledge-base-agent/  # KB RAG agent
+│       └── crm-agent/            # CRM agent (5 tools)
+├── docs/
+│   ├── guides/              # Developer guides
+│   ├── patterns/            # Architecture patterns
+│   └── reference/           # Reference documentation
+└── resources/               # Sample data (KB documents)
+```
+
 ## Documentation
 
 | Topic | Link |
@@ -163,7 +196,6 @@ See the [Deployment Guide](infrastructure/DEPLOYMENT.md) for full manual cleanup
 | Full Deployment Guide | [infrastructure/DEPLOYMENT.md](infrastructure/DEPLOYMENT.md) |
 | Cost Estimation | [docs/reference/cost-estimation.md](docs/reference/cost-estimation.md) |
 | Troubleshooting | [docs/reference/troubleshooting.md](docs/reference/troubleshooting.md) |
-| Project Structure | [docs/reference/project-structure.md](docs/reference/project-structure.md) |
 | Daily.co Setup | [docs/reference/daily-setup.md](docs/reference/daily-setup.md) |
 | Deepgram Marketplace Setup | [docs/reference/deepgram-marketplace-setup.md](docs/reference/deepgram-marketplace-setup.md) |
 | Call Transfers | [docs/reference/call-transfers.md](docs/reference/call-transfers.md) |
