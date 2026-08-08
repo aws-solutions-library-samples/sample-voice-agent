@@ -37,6 +37,8 @@ export interface VoiceAgentConfig {
   sessionCapacityPerTask: number;
   /** Optional SIP URI for call transfers (e.g., sip:user@pbx:5060). When set, the transfer tool is enabled. */
   transferDestination?: string;
+  /** Optional Deepgram Flux STT Model Package ARN for native turn detection. */
+  fluxSttModelPackageArn?: string;
 }
 
 /**
@@ -167,6 +169,13 @@ export function loadConfig(app: App): VoiceAgentConfig {
     process.env.TRANSFER_DESTINATION ||
     undefined;
 
+  // Optional: Deepgram Flux STT Model Package ARN
+  // Can be set via CDK context, env var, or left unset to skip Flux endpoint deployment
+  const fluxSttModelPackageArn =
+    app.node.tryGetContext(`${prefix}:fluxSttModelPackageArn`) ||
+    process.env.DEEPGRAM_FLUX_STT_MODEL_PACKAGE_ARN ||
+    undefined;
+
   return {
     environment,
     region,
@@ -179,5 +188,6 @@ export function loadConfig(app: App): VoiceAgentConfig {
     targetSessionsPerTask,
     sessionCapacityPerTask,
     transferDestination,
+    fluxSttModelPackageArn,
   };
 }

@@ -21,6 +21,7 @@ export const SSM_PARAMS = {
   // SageMaker stack outputs
   STT_ENDPOINT_NAME: '/voice-agent/sagemaker/stt-endpoint-name',
   TTS_ENDPOINT_NAME: '/voice-agent/sagemaker/tts-endpoint-name',
+  FLUX_STT_ENDPOINT_NAME: '/voice-agent/sagemaker/flux-stt-endpoint-name',
 
   // ECS stack outputs
   ECS_CLUSTER_ARN: '/voice-agent/ecs/cluster-arn',

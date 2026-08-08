@@ -39,7 +39,32 @@ def create_stt_service(config: "PipelineConfig"):
     """
     provider = config.stt_provider.lower()
 
-    if provider == "sagemaker":
+    if provider == "flux-sagemaker":
+        from app.services.deepgram_flux_sagemaker_stt import DeepgramFluxSageMakerSTTService
+
+        from app.services.sagemaker_credentials import patch_sagemaker_bidi_credentials
+
+        patch_sagemaker_bidi_credentials()
+
+        endpoint_name = config.flux_stt_endpoint or config.stt_endpoint
+        if not endpoint_name:
+            raise ValueError(
+                "FLUX_STT_ENDPOINT_NAME (or STT_ENDPOINT_NAME) is required when STT_PROVIDER=flux-sagemaker"
+            )
+
+        logger.info(
+            "stt_provider_selected",
+            provider="flux-sagemaker",
+            endpoint=endpoint_name,
+            region=config.aws_region,
+        )
+        return DeepgramFluxSageMakerSTTService(
+            endpoint_name=endpoint_name,
+            region=config.aws_region,
+            settings=DeepgramFluxSageMakerSTTService.Settings(min_confidence=0.3),
+        )
+
+    elif provider == "sagemaker":
         from app.services.deepgram_sagemaker_stt import DeepgramSageMakerSTTService
         from deepgram import LiveOptions
 
