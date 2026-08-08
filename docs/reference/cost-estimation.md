@@ -28,7 +28,7 @@ The following table provides a sample cost breakdown for deploying this Guidance
 | Amazon SageMaker STT Endpoint | ml.g6.2xlarge, always-on | ~$350/month |
 | Amazon SageMaker TTS Endpoint | ml.g6.12xlarge, always-on | ~$450/month |
 
-> Third-party service costs (Daily.co, Deepgram, Cartesia) vary by usage and are not included above. Refer to each provider's pricing page.
+> Third-party service costs (Daily.co, Deepgram, Deepgram Flux, Cartesia) vary by usage and are not included above. Refer to each provider's pricing page.
 
 ## Additional Considerations
 

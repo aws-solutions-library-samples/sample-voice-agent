@@ -4,10 +4,10 @@
 
 | Mode | STT/TTS | Best For |
 | ---- | ------- | -------- |
-| **Cloud API** (`USE_CLOUD_APIS=true`) | Deepgram + Cartesia cloud APIs | Getting started, development |
+| **Cloud API** (`USE_CLOUD_APIS=true`) | Deepgram (or Deepgram Flux) + Cartesia cloud APIs | Getting started, development |
 | **Amazon SageMaker** (default) | Self-hosted on GPU instances | Production, data residency |
 
-Cloud API mode requires Deepgram and Cartesia API keys. Amazon SageMaker mode requires [Deepgram Marketplace subscriptions](deepgram-marketplace-setup.md) and GPU quota.
+Cloud API mode requires Deepgram and Cartesia API keys. Optionally use Deepgram Flux for prosody-aware turn detection (`STT_PROVIDER=flux-sagemaker`). Amazon SageMaker mode requires [Deepgram Marketplace subscriptions](deepgram-marketplace-setup.md) and GPU quota.
 
 ## Known Issues
 
