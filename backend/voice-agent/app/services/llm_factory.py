@@ -12,16 +12,14 @@ OpenAILLMService with a custom base_url.
 """
 
 import os
-from typing import TYPE_CHECKING
 
 import structlog
 
-if TYPE_CHECKING:
-    from app.pipeline_ecs import PipelineConfig
-
 logger = structlog.get_logger(__name__)
 
-# Models that use the Converse API via bedrock-runtime (AWSBedrockLLMService)
+# Models that use the Converse API via bedrock-runtime (AWSBedrockLLMService).
+# For documentation/validation; routing uses MANTLE_MODELS as the branch condition.
+# Unknown models not in either set default to Converse (bedrock-runtime).
 CONVERSE_MODELS = {
     # Claude models (default)
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",

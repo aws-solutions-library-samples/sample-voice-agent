@@ -133,3 +133,19 @@ class TestCreateLlmService:
 
         call_kwargs = mock_openai_class.call_args[1]
         assert call_kwargs["base_url"] == "https://bedrock-mantle.us-west-2.api.aws/v1"
+
+    @patch("pipecat.services.aws.llm.AWSBedrockLLMService")
+    def test_unknown_model_defaults_to_bedrock(self, mock_bedrock_class):
+        """Unknown models not in MANTLE_MODELS default to Converse/bedrock-runtime."""
+        mock_bedrock_class.InputParams = MagicMock()
+        mock_bedrock_class.return_value = MagicMock()
+
+        result = create_llm_service(
+            model_id="some.unknown-model-v1",
+            region="us-east-1",
+        )
+
+        mock_bedrock_class.assert_called_once()
+        call_kwargs = mock_bedrock_class.call_args[1]
+        assert call_kwargs["model"] == "some.unknown-model-v1"
+        assert call_kwargs["region"] == "us-east-1"
