@@ -53,7 +53,7 @@ Open in Claude Code (or your preferred AI-assisted IDE) and choose a deployment 
 2. **`/configure-daily`** -- Sets up a phone number with PSTN dial-in
 3. **`/verify-deployment`** -- Health-checks all components
 
-> SageMaker mode requires GPU quota for `ml.g6.2xlarge` and `ml.g6.12xlarge` ([request via Service Quotas](https://console.aws.amazon.com/servicequotas/)) and [Deepgram Marketplace subscriptions](docs/reference/deepgram-marketplace-setup.md).
+> SageMaker mode requires GPU quota for `ml.g6.2xlarge` and `ml.g6.12xlarge` ([request via Service Quotas](https://console.aws.amazon.com/servicequotas/)), [AWS Marketplace subscriptions](docs/reference/deepgram-marketplace-setup.md) to the STT/TTS model packages, and no third-party API keys.
 
 You now have a callable phone number with a voice AI agent.
 
