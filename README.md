@@ -16,6 +16,8 @@ A sample foundation for building real-time voice AI agents on AWS. Handles phone
 - **AWS CLI v2** configured with credentials
 - **Finch** (or Docker) for container builds
 - **Amazon Bedrock** model access enabled in your target Region
+- **Deepgram** (or Deepgram Flux) API key for STT
+- **Cartesia** API key for TTS
 - **Daily.co** account (for phone/SIP transport -- not needed for local prototyping)
 
 ```bash
