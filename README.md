@@ -1,5 +1,11 @@
 # Guidance for voice agents on AWS
 
+[![License: MIT-0](https://img.shields.io/badge/License-MIT--0-yellow.svg?style=flat)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-green.svg?style=flat&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![AWS CDK](https://img.shields.io/badge/AWS_CDK-v2-orange.svg?style=flat&logo=amazonaws&logoColor=white)](https://aws.amazon.com/cdk/)
+[![Built with Pipecat](https://img.shields.io/badge/Built_with-Pipecat-purple.svg?style=flat)](https://github.com/pipecat-ai/pipecat)
+
 ## Table of Contents
 
 1. [Overview](#overview)
