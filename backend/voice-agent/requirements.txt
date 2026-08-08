@@ -5,12 +5,12 @@
 # - daily: WebRTC transport
 # - silero: Voice Activity Detection
 # - deepgram: Cloud STT API + SageMaker STT (DeepgramSageMakerSTTService)
-# - cartesia: Cloud TTS API
+# - cartesia: Cloud STT (Ink-whisper, Ink-2) and TTS (Sonic) APIs
 # - aws: Bedrock LLM support
 # - sagemaker: HTTP/2 BiDi streaming for SageMaker endpoints (requires Python >= 3.12)
 # - webrtc: SmallWebRTCTransport for local browser-based prototyping (aiortc)
 # - runner: FastAPI dev server + prebuilt WebRTC browser UI
-pipecat-ai[daily,silero,deepgram,cartesia,aws,sagemaker,webrtc,runner]==0.0.102
+pipecat-ai[daily,silero,deepgram,cartesia,aws,sagemaker,webrtc,runner]==1.7.0
 
 # AWS SDK - let pip resolve version to match aiobotocore requirements
 # aiobotocore 2.25.1 requires botocore>=1.40.46
