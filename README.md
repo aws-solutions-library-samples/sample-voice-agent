@@ -218,6 +218,7 @@ See the [Deployment Guide](infrastructure/DEPLOYMENT.md) for full manual cleanup
 
 | Date | Description |
 | ---- | ----------- |
+| August 2026 | Deepgram Flux STT support as alternative provider (#18), README restructure for getting-started focus |
 | March 2026 | Initial release -- Cloud API and Amazon SageMaker deployment modes, A2A capability agents, auto-scaling |
 
 ## Notices
