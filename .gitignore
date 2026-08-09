@@ -63,3 +63,10 @@ backend/*/__pycache__/
 # Keep examples
 !.env.example
 !infrastructure/.env.example
+
+# Agent-agnostic skills: local/private skills are not committed
+.agents/skills-local/*
+!.agents/skills-local/.gitkeep
+
+# Claude Code machine-local settings
+.claude/settings.local.json
