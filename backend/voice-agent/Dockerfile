@@ -13,44 +13,59 @@
 # ========================
 # Stage 1: Build / Install
 # ========================
-FROM python:3.12-slim AS builder
+# Using Amazon Linux 2023 for better AWS integration and security
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Build tools for any native extensions (gcc, python3-dev)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Build tools for any native extensions (gcc, python3-devel)
+# Amazon Linux 2023 uses OpenSSL (no gnutls/mbedtls vulnerabilities)
+RUN yum install -y \
     gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+    python3.13 \
+    python3.13-devel \
+    python3.13-pip \
+    && yum clean all
 
 WORKDIR /app
 
 # Copy requirements first for better layer caching
 COPY requirements.txt .
 
-# Install Python dependencies into a virtual env for clean copy
-RUN python -m venv /app/venv
+# Set Python 3.13 as default and install dependencies into a virtual env
+RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1 \
+    && alternatives --set python3 /usr/bin/python3.13 \
+    && python3 -m venv /app/venv
+
 ENV PATH="/app/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ========================
 # Stage 2: Runtime
 # ========================
-FROM python:3.12-slim
+# Using Amazon Linux 2023 for better AWS integration and security
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Runtime-only system dependencies (no gcc/python3-dev)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Runtime-only system dependencies (no gcc/python3-devel)
+# Amazon Linux 2023 uses OpenSSL (no gnutls/mbedtls vulnerabilities)
+RUN yum install -y \
+    python3.13 \
+    python3.13-libs \
     # Audio processing
-    libsndfile1 \
-    ffmpeg \
-    # Networking (health checks)
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    libsndfile \
+    # User management tools
+    shadow-utils \
+    # Networking (health checks) - curl-minimal already installed
+    && yum clean all
+
+# Set Python 3.13 as default
+RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1 \
+    && alternatives --set python3 /usr/bin/python3.13
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser

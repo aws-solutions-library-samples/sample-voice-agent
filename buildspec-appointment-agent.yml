@@ -1,0 +1,28 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo Building appointment-agent with image tag $IMAGE_TAG
+
+  build:
+    commands:
+      - echo Build started on `date`
+      - cd backend/agents/appointment-agent
+      - docker build -t appointment-agent .
+      - docker tag appointment-agent $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-$IMAGE_TAG
+      - docker tag appointment-agent $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-latest
+
+  post_build:
+    commands:
+      - echo Pushing the Docker images...
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-$IMAGE_TAG
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:appointment-agent-latest
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
