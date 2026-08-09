@@ -34,6 +34,7 @@ class ProviderConfig:
     stt_provider: str = "deepgram"
     tts_provider: str = "cartesia"
     voice_id: str = "79a125e8-cd45-4c13-8a67-188112f4dd22"
+    flux_stt_endpoint_name: str = ""
 
 
 @dataclass
@@ -259,6 +260,7 @@ class ConfigService:
             f"{self.CONFIG_PATH}/stt-provider",
             f"{self.CONFIG_PATH}/tts-provider",
             f"{self.CONFIG_PATH}/voice-id",
+            f"{self.CONFIG_PATH}/flux-stt-endpoint-name",
             f"{self.CONFIG_PATH}/enable-tool-calling",
             f"{self.CONFIG_PATH}/enable-filler-phrases",
             f"{self.CONFIG_PATH}/enable-conversation-logging",
@@ -297,6 +299,7 @@ class ConfigService:
             voice_id=params.get(
                 f"{self.CONFIG_PATH}/voice-id", "79a125e8-cd45-4c13-8a67-188112f4dd22"
             ),
+            flux_stt_endpoint_name=params.get(f"{self.CONFIG_PATH}/flux-stt-endpoint-name", ""),
         )
 
         # Feature flags

@@ -118,5 +118,75 @@ export class SageMakerStack extends cdk.Stack {
       value: this.sagemakerConstruct.executionRole.roleArn,
       description: 'SageMaker Execution Role ARN',
     });
+
+    // =====================
+    // Optional: Deepgram Flux STT Endpoint
+    // =====================
+    // Flux provides native turn detection and multilingual support.
+    // Only deployed when a valid model package ARN is provided.
+    const fluxSttModelPackageArn = config.fluxSttModelPackageArn;
+
+    if (fluxSttModelPackageArn && !fluxSttModelPackageArn.includes('PLACEHOLDER')) {
+      const resourcePrefix = `${config.projectName}-${config.environment}`;
+      const fluxSttModelName = `${resourcePrefix}-flux-stt-model`;
+      const fluxSttEndpointName = `${resourcePrefix}-flux-stt-endpoint`;
+
+      const privateSubnets = vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      });
+
+      const fluxSttModel = new cdk.aws_sagemaker.CfnModel(this, 'FluxSttModel', {
+        modelName: fluxSttModelName,
+        executionRoleArn: this.sagemakerConstruct.executionRole.roleArn,
+        enableNetworkIsolation: true,
+        primaryContainer: {
+          modelPackageName: fluxSttModelPackageArn,
+        },
+        vpcConfig: {
+          securityGroupIds: [sagemakerSg.securityGroupId],
+          subnets: privateSubnets.subnetIds,
+        },
+      });
+
+      const fluxSttEndpointConfig = new cdk.aws_sagemaker.CfnEndpointConfig(
+        this,
+        'FluxSttEndpointConfig',
+        {
+          endpointConfigName: `${resourcePrefix}-flux-stt-config`,
+          productionVariants: [
+            {
+              variantName: 'AllTraffic',
+              modelName: fluxSttModelName,
+              initialInstanceCount: config.environment === 'prod' ? 2 : 1,
+              instanceType: 'ml.g6.2xlarge',
+              initialVariantWeight: 1,
+              modelDataDownloadTimeoutInSeconds: 3600,
+            },
+          ],
+        }
+      );
+      fluxSttEndpointConfig.addDependency(fluxSttModel);
+
+      const fluxSttEndpoint = new cdk.aws_sagemaker.CfnEndpoint(
+        this,
+        'FluxSttEndpoint',
+        {
+          endpointName: fluxSttEndpointName,
+          endpointConfigName: fluxSttEndpointConfig.endpointConfigName!,
+        }
+      );
+      fluxSttEndpoint.addDependency(fluxSttEndpointConfig);
+
+      new ssm.StringParameter(this, 'FluxSttEndpointNameParam', {
+        parameterName: SSM_PARAMS.FLUX_STT_ENDPOINT_NAME,
+        stringValue: fluxSttEndpointName,
+        description: 'Voice Agent Flux STT Endpoint Name (Deepgram Flux with native turn detection)',
+      });
+
+      new cdk.CfnOutput(this, 'FluxSttEndpointName', {
+        value: fluxSttEndpointName,
+        description: 'Deepgram Flux STT Endpoint Name',
+      });
+    }
   }
 }

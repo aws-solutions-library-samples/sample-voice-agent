@@ -181,6 +181,7 @@ class PipelineConfig:
     tts_provider: str = "cartesia"
     stt_endpoint: str = ""
     tts_endpoint: str = ""
+    flux_stt_endpoint: str = ""
 
 
 async def create_voice_pipeline(

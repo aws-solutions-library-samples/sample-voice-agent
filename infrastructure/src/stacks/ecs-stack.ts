@@ -431,6 +431,10 @@ export class EcsStack extends cdk.Stack {
         TTS_PROVIDER: ttsEndpointName.includes('cloud-api-mode') ? 'cartesia' : 'sagemaker',
         STT_ENDPOINT_NAME: sttEndpointName,
         TTS_ENDPOINT_NAME: ttsEndpointName,
+        // Flux STT endpoint (optional - for native turn detection)
+        ...(config.fluxSttModelPackageArn && !config.fluxSttModelPackageArn.includes('PLACEHOLDER')
+          ? { FLUX_STT_ENDPOINT_NAME: `${config.projectName}-${config.environment}-flux-stt-endpoint` }
+          : {}),
         // A2A capability discovery namespace
         A2A_NAMESPACE: this.capabilityNamespace.namespaceName,
         // Auto-scaling: max concurrent calls per container

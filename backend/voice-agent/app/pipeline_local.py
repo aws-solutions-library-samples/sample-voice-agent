@@ -64,6 +64,7 @@ class LocalPipelineConfig:
     tts_provider: str = "cartesia"
     stt_endpoint: str = ""
     tts_endpoint: str = ""
+    flux_stt_endpoint: str = ""
 
 
 def _get_config():
@@ -168,6 +169,7 @@ async def create_local_pipeline(
         tts_provider=config.tts_provider,
         stt_endpoint=config.stt_endpoint,
         tts_endpoint=config.tts_endpoint,
+        flux_stt_endpoint=config.flux_stt_endpoint,
     )
 
     from app.services.factory import create_stt_service
