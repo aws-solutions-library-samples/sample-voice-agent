@@ -358,6 +358,10 @@ class PipelineManager:
                 ),
                 stt_endpoint=os.environ.get("STT_ENDPOINT_NAME", ""),
                 tts_endpoint=os.environ.get("TTS_ENDPOINT_NAME", ""),
+                flux_stt_endpoint=os.environ.get(
+                    "FLUX_STT_ENDPOINT_NAME",
+                    self.config.providers.flux_stt_endpoint_name,
+                ),
             )
 
             # Create the pipeline with metrics collector
