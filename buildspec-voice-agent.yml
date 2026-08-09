@@ -1,0 +1,43 @@
+version: 0.2
+
+# CodeBuild buildspec for building and pushing voice-agent container
+# Addresses security vulnerabilities by building with updated Dockerfile
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo Building voice-agent with image tag $IMAGE_TAG
+      - echo Attempting to pull Amazon Linux base image to warm Docker cache...
+      - docker pull public.ecr.aws/amazonlinux/amazonlinux:2023 || echo "Docker pull failed, will try during build"
+
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image for voice-agent...
+      - cd backend/voice-agent
+      - docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+      - docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images...
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      - echo Writing image definitions file...
+      - printf '[{"name":"voice-agent","imageUri":"%s"}]' $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    # Set ECR_REGISTRY and ECR_REPOSITORY as CodeBuild environment variables
+    # Example: ECR_REGISTRY=<account-id>.dkr.ecr.<region>.amazonaws.com
+    # Example: ECR_REPOSITORY=<your-ecr-repo-name>
