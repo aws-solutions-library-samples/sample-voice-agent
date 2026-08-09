@@ -44,7 +44,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.observers.base_observer import BaseObserver
-from pipecat.services.aws.llm import AWSBedrockLLMService
 from pipecat.transports.daily.transport import (
     DailyDialinSettings,
     DailyParams,
@@ -274,20 +273,13 @@ async def create_voice_pipeline(
     logger.info("stt_service_created", provider=config.stt_provider)
 
     # =====================
-    # LLM Service (Bedrock Claude)
+    # LLM Service (via factory)
     # =====================
-    # Use inference profile ID instead of foundation model ID
-    # This is required for on-demand throughput with newer Claude models
     llm_model_id = _get_llm_model_id()
-    llm = AWSBedrockLLMService(
-        model=llm_model_id,
-        region=config.aws_region,
-        params=AWSBedrockLLMService.InputParams(
-            max_tokens=256,
-            temperature=0.7,
-        ),
-    )
-    logger.info("llm_service_created", provider="bedrock", model=llm_model_id)
+
+    from app.services.llm_factory import create_llm_service
+
+    llm = create_llm_service(model_id=llm_model_id, region=config.aws_region)
 
     # =====================
     # Tool Calling Setup
@@ -600,7 +592,7 @@ async def create_voice_pipeline(
 
 
 def _register_tools(
-    llm: AWSBedrockLLMService,
+    llm,
     session_id: str,
     transport: DailyTransport,
     collector: Optional["MetricsCollector"] = None,
@@ -824,7 +816,7 @@ def _register_tools(
 
 
 def _register_capabilities(
-    llm: AWSBedrockLLMService,
+    llm,
     session_id: str,
     transport: DailyTransport,
     collector: Optional["MetricsCollector"] = None,

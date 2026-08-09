@@ -42,7 +42,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.observers.base_observer import BaseObserver
-from pipecat.services.aws.llm import AWSBedrockLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
@@ -179,18 +178,13 @@ async def create_local_pipeline(
     logger.info("stt_service_created", provider=config.stt_provider)
 
     # =====================
-    # LLM Service (Bedrock Claude)
+    # LLM Service (via factory)
     # =====================
     llm_model_id = _get_llm_model_id()
-    llm = AWSBedrockLLMService(
-        model=llm_model_id,
-        region=config.aws_region,
-        params=AWSBedrockLLMService.InputParams(
-            max_tokens=256,
-            temperature=0.7,
-        ),
-    )
-    logger.info("llm_service_created", provider="bedrock", model=llm_model_id)
+
+    from app.services.llm_factory import create_llm_service
+
+    llm = create_llm_service(model_id=llm_model_id, region=config.aws_region)
 
     # =====================
     # Tool Calling Setup
@@ -378,7 +372,7 @@ async def create_local_pipeline(
 
 
 def _register_local_tools(
-    llm: AWSBedrockLLMService,
+    llm,
     session_id: str,
     transport: BaseTransport,
     collector: Optional["MetricsCollector"] = None,
