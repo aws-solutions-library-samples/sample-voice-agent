@@ -66,7 +66,9 @@ def create_stt_service(config: "PipelineConfig"):
 
     elif provider == "sagemaker":
         from app.services.deepgram_sagemaker_stt import DeepgramSageMakerSTTService
-        from deepgram import LiveOptions
+
+        # deepgram-sdk 6.x removed LiveOptions; Pipecat ships a compat wrapper.
+        from pipecat.services.deepgram.stt import LiveOptions
 
         from app.services.sagemaker_credentials import patch_sagemaker_bidi_credentials
 
@@ -92,7 +94,11 @@ def create_stt_service(config: "PipelineConfig"):
                 interim_results=True,
                 punctuate=True,
                 encoding="linear16",
-                sample_rate=8000,
+                # Must match the transport's sample rate. Local WebRTC runs at
+                # 16000 (LOCAL_SAMPLE_RATE in pipeline_local.py); 8000 is the
+                # PSTN/telephony rate. A mismatch makes the BiDi handshake hang
+                # silently — Pipecat's built-in STT service has no timeout.
+                sample_rate=int(os.environ.get("STT_SAMPLE_RATE", "16000")),
                 channels=1,
             ),
         )
