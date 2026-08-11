@@ -12,6 +12,11 @@
 # - runner: FastAPI dev server + prebuilt WebRTC browser UI
 pipecat-ai[daily,silero,deepgram,cartesia,aws,sagemaker,webrtc,runner]==0.0.108
 
+# Starlette is not constrained by pipecat-ai or fastapi<1, so a clean install
+# picks up 1.x, which removed FastAPI.add_event_handler() and breaks
+# app/local_main.py at import time.
+starlette<1.0
+
 # AWS SDK - let pip resolve version to match aiobotocore requirements
 # aiobotocore 2.25.1 requires botocore>=1.40.46
 # Do NOT pin boto3/botocore here - it conflicts with pipecat[aws]
