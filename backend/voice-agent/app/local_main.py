@@ -38,13 +38,14 @@ import warnings
 import structlog
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Request, Response
 from fastapi.responses import RedirectResponse
 
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.request_handler import (
     ConnectionMode,
+    IceCandidate,
     SmallWebRTCRequestHandler,
     SmallWebRTCRequest,
     SmallWebRTCPatchRequest,
@@ -104,9 +105,9 @@ small_webrtc_handler = SmallWebRTCRequestHandler(
 
 # Mount the prebuilt browser UI at /client
 try:
-    from pipecat_ai_small_webrtc_prebuilt import SmallWebRTCPrebuiltUI
+    from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-    app.mount("/client", SmallWebRTCPrebuiltUI(), name="client")
+    app.mount("/client", SmallWebRTCPrebuiltUI, name="client")
     logger.info("prebuilt_ui_mounted", path="/client")
 except ImportError:
     logger.warning(
@@ -119,6 +120,75 @@ except ImportError:
 async def root():
     """Redirect to the browser UI."""
     return RedirectResponse(url="/client/index.html")
+
+
+# The prebuilt UI (pipecat-ai-small-webrtc-prebuilt 2.5.0) speaks the two-phase
+# Pipecat Cloud protocol: POST /start to open a session, then
+# POST /sessions/{id}/api/offer for the SDP exchange. This module only
+# implemented the older single-phase POST /api/offer, so Connect failed with 404
+# then 422. These two routes bridge the new client to the existing handler.
+_active_sessions: dict[str, dict] = {}
+
+
+@app.post("/start")
+async def rtvi_start(request: Request):
+    """Phase 1: open a session (mirrors Pipecat Cloud's /start)."""
+    try:
+        request_data = await request.json()
+    except Exception:
+        request_data = {}
+
+    session_id = str(uuid.uuid4())
+    _active_sessions[session_id] = request_data.get("body", {})
+
+    result: dict = {"sessionId": session_id}
+    if request_data.get("enableDefaultIceServers"):
+        result["iceConfig"] = {
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        }
+    return result
+
+
+@app.post("/sessions/{session_id}/api/offer")
+async def session_offer(
+    session_id: str, request: Request, background_tasks: BackgroundTasks
+):
+    """Phase 2: SDP exchange, proxied to the existing offer handler."""
+    if session_id not in _active_sessions:
+        return Response(content="Invalid or not-yet-ready session_id", status_code=404)
+    data = await request.json()
+    return await offer(
+        SmallWebRTCRequest(
+            sdp=data["sdp"],
+            type=data["type"],
+            pc_id=data.get("pc_id"),
+            restart_pc=data.get("restart_pc"),
+            request_data=data.get("request_data")
+            or data.get("requestData")
+            or _active_sessions[session_id],
+        ),
+        background_tasks,
+    )
+
+
+@app.patch("/sessions/{session_id}/api/offer")
+async def session_offer_patch(session_id: str, request: Request):
+    """Phase 2 (trickle ICE): proxied to the existing patch handler.
+
+    The client PATCHes additional ICE candidates to the session-scoped path as
+    they are discovered. Without this the PATCH returns 405 and the connection
+    falls back to only the candidates present in the initial offer, which can
+    fail on more restrictive networks.
+    """
+    if session_id not in _active_sessions:
+        return Response(content="Invalid or not-yet-ready session_id", status_code=404)
+    data = await request.json()
+    return await offer_patch(
+        SmallWebRTCPatchRequest(
+            pc_id=data["pc_id"],
+            candidates=[IceCandidate(**c) for c in data.get("candidates", [])],
+        )
+    )
 
 
 @app.post("/api/offer")
