@@ -109,24 +109,32 @@ class DeepgramSageMakerTTSService(TTSService):
         # Track whether we're in an active synthesis
         self._synthesizing = False
 
-        self.set_model_name(voice)
+        # Pipecat 0.0.108 replaced the synchronous set_model_name() with an
+        # async set_model(), which can't be awaited from __init__. Assign the
+        # setting directly and sync metrics, matching how Pipecat's own
+        # DeepgramTTSService seeds the model in its constructor.
+        self._settings.model = voice
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
         return True
 
-    def set_voice(self, voice: str):
+    async def set_voice(self, voice: str):
         """Set the Deepgram Aura voice.
 
         Note: Voice changes take effect on the next connection. If a session is
         active, it will need to be disconnected and reconnected.
+
+        Async to match TTSService.set_voice() in the base class, which this
+        previously shadowed with a sync method.
 
         Args:
             voice: Deepgram Aura voice name (e.g., "aura-2-thalia-en").
         """
         logger.info("tts_voice_switching", voice=voice)
         self._voice = voice
-        self.set_model_name(voice)
+        await self.set_model(voice)  # set_model_name removed in pipecat 0.0.108
 
     async def start(self, frame: StartFrame):
         """Start the Deepgram SageMaker TTS service."""
