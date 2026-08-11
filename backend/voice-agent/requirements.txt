@@ -10,7 +10,7 @@
 # - sagemaker: HTTP/2 BiDi streaming for SageMaker endpoints (requires Python >= 3.12)
 # - webrtc: SmallWebRTCTransport for local browser-based prototyping (aiortc)
 # - runner: FastAPI dev server + prebuilt WebRTC browser UI
-pipecat-ai[daily,silero,deepgram,cartesia,aws,sagemaker,webrtc,runner]==0.0.108
+pipecat-ai[daily,silero,deepgram,cartesia,aws,sagemaker,webrtc,runner]==1.4.0
 
 # Starlette is not constrained by pipecat-ai or fastapi<1, so a clean install
 # picks up 1.x, which removed FastAPI.add_event_handler() and breaks
