@@ -12,6 +12,34 @@ Deepgram TTS Protocol (via SageMaker BiDi):
 - Close connection: {"type": "Close"}
 - Receive: binary audio chunks (linear16/mulaw/alaw)
 
+Turn vs. sentence boundaries:
+Pipecat's TTSService base class aggregates LLM output into per-sentence
+AggregatedTextFrames but expects a *single* audio context (bracketed by one
+TTSStartedFrame/TTSStoppedFrame pair) per LLM turn, not per sentence.
+Sentences within the same turn share one context_id (see
+TTSService.create_context_id() / _reuse_context_id_within_turn) and are
+routed through create_audio_context()/append_to_audio_context() so the
+transport only reports "bot started/stopped speaking" once per turn.
+
+This service participates in that per-turn audio-context lifecycle instead
+of yielding its own ad hoc TTSStartedFrame/TTSStoppedFrame from run_tts() on
+every call (i.e. per sentence). run_tts() only sends the "Speak" message;
+the base class calls flush_audio() (which sends "Flush") once per turn, when
+the LLM response ends. Audio bytes and the terminal TTSStoppedFrame arrive
+asynchronously on the response-processor task and are appended directly to
+the turn's audio context via append_to_audio_context(), matching the pattern
+used by Pipecat's own DeepgramSageMakerTTSService
+(pipecat.services.deepgram.sagemaker.tts). Emitting Started/Stopped per
+sentence instead of per turn was the root cause of
+https://github.com/aws-solutions-library-samples/sample-voice-agent/issues/29:
+each mid-turn TTSStoppedFrame made the transport fire "bot stopped speaking",
+which made RTVIObserver queue the *next* AggregatedTextFrame/TTSTextFrame
+instead of reporting it immediately (it only flushes queued text on the next
+"bot started speaking"). For the last sentence of a turn, that next
+"started speaking" doesn't happen until the following turn's first audio
+chunk, so the report for that sentence -- and, once the frame reaches the
+transport, its audio -- surfaces at the start of the next turn.
+
 Reference:
 - Deepgram TTS WebSocket docs: https://developers.deepgram.com/docs/tts-websocket
 - Pipecat DeepgramSageMakerSTTService: pipecat.services.deepgram.stt_sagemaker
@@ -32,7 +60,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
@@ -92,7 +119,17 @@ class DeepgramSageMakerTTSService(TTSService):
             encoding: Audio encoding format ("linear16", "mulaw", "alaw").
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            # Let the base class own the audio-context lifecycle: it will
+            # create the context and yield TTSStartedFrame on the first
+            # sentence of a turn (push_start_frame) and emit TTSStoppedFrame
+            # when the context is closed (push_stop_frames), rather than us
+            # yielding those frames per sentence from run_tts().
+            push_start_frame=True,
+            push_stop_frames=True,
+            **kwargs,
+        )
 
         self._endpoint_name = endpoint_name
         self._region = region
@@ -103,11 +140,12 @@ class DeepgramSageMakerTTSService(TTSService):
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None
 
-        # Queue for receiving audio chunks from the response processor
-        self._audio_queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue()
-
-        # Track whether we're in an active synthesis
-        self._synthesizing = False
+        # Turn-boundary bookkeeping (see module docstring for full rationale).
+        # All sentences in one LLM turn share the same audio context
+        # (context_id), so completion of that context is driven by Deepgram's
+        # "Flushed" acknowledgement to our flush_audio() call at the end of
+        # the turn -- not by any individual sentence's audio finishing.
+        self._active_context_id: Optional[str] = None
 
         # Pipecat 0.0.108 replaced the synchronous set_model_name() with an
         # async set_model(), which can't be awaited from __init__. Assign the
@@ -152,20 +190,29 @@ class DeepgramSageMakerTTSService(TTSService):
         await self._disconnect()
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        """Convert text to speech via SageMaker BiDi streaming.
+        """Send text to Deepgram for synthesis within the current turn's audio context.
 
-        Sends text to the Deepgram Aura model on SageMaker and yields audio
-        frames as they arrive. Uses the Deepgram TTS WebSocket protocol:
-        1. Send {"type": "Speak", "text": text}
-        2. Send {"type": "Flush"} to trigger generation
-        3. Receive binary audio chunks from the response stream
+        Unlike a one-shot HTTP TTS call, this only sends the "Speak" message.
+        Deepgram accumulates text across all sentences of a turn in its own
+        buffer; we do not force generation here so the resulting audio keeps
+        flowing into the same per-turn audio context (identified by
+        context_id, shared across sentences via
+        TTSService.create_context_id()). Generation is triggered once per
+        turn by flush_audio(), which the base class calls after the last
+        sentence of an LLM response (see
+        TTSService.on_turn_context_completed()). Audio bytes and the
+        terminal TTSStoppedFrame arrive asynchronously via
+        _process_responses(), which appends them directly to this context.
 
         Args:
             text: Text to synthesize.
-            context_id: TTS context ID for tracking (Pipecat v0.0.102+).
+            context_id: TTS context ID shared by all sentences in this turn
+                (Pipecat v0.0.102+).
 
         Yields:
-            Frame: TTSStartedFrame, TTSAudioRawFrame chunks, TTSStoppedFrame.
+            Frame: Nothing on the success path (audio arrives out-of-band via
+            the response processor); an ErrorFrame if the client is not
+            connected or the Speak message could not be sent.
         """
         if not text.strip():
             return
@@ -180,60 +227,11 @@ class DeepgramSageMakerTTSService(TTSService):
 
         logger.debug("tts_synthesizing", text_preview=text[:80])
 
+        self._active_context_id = context_id
+
         try:
-            # Signal TTS start
-            yield TTSStartedFrame()
-
-            # Clear any leftover audio from previous synthesis
-            while not self._audio_queue.empty():
-                try:
-                    self._audio_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-
-            self._synthesizing = True
-
-            # Send text to Deepgram for synthesis
             await self._client.send_json({"type": "Speak", "text": text})
-
-            # Send Flush to trigger audio generation
-            await self._client.send_json({"type": "Flush"})
-
-            # Yield audio chunks as they arrive from the response processor
-            # The response processor puts audio bytes into _audio_queue.
-            # A None sentinel signals that a Flushed event was received
-            # (all audio for this Flush has been delivered).
-            while self._synthesizing:
-                try:
-                    audio_data = await asyncio.wait_for(
-                        self._audio_queue.get(), timeout=10.0
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "tts_audio_receive_timeout",
-                        timeout_seconds=10.0,
-                        endpoint_name=self._endpoint_name,
-                    )
-                    break
-
-                if audio_data is None:
-                    # Flushed sentinel — all audio for this text delivered
-                    break
-
-                # Yield audio chunk as a raw frame
-                yield TTSAudioRawFrame(
-                    audio=audio_data,
-                    sample_rate=self._sample_rate,
-                    num_channels=1,
-                )
-
-            self._synthesizing = False
-
-            # Signal TTS complete
-            yield TTSStoppedFrame()
-
         except Exception as e:
-            self._synthesizing = False
             logger.error(
                 "tts_synthesis_error",
                 error=str(e),
@@ -242,7 +240,27 @@ class DeepgramSageMakerTTSService(TTSService):
                 endpoint_name=self._endpoint_name,
             )
             yield ErrorFrame(error=f"TTS synthesis failed: {e}")
-            yield TTSStoppedFrame()
+
+    async def flush_audio(self, context_id: Optional[str] = None):
+        """Trigger audio generation for all text sent so far in this turn.
+
+        Called once per LLM turn by the base class (TTSService), after the
+        last sentence has been sent to run_tts() -- via
+        on_turn_context_completed(), which fires on LLMFullResponseEndFrame
+        or a standalone TTSSpeakFrame. Sends the Deepgram "Flush" command so
+        all buffered text is generated as audio. The corresponding "Flushed"
+        acknowledgement (handled in _process_responses()) is what closes the
+        turn's audio context -- not any individual sentence's audio
+        finishing -- which is what keeps one turn's Started/Stopped frame
+        pair spanning all of its sentences.
+        """
+        if not self._client or not self._client.is_active:
+            return
+
+        try:
+            await self._client.send_json({"type": "Flush"})
+        except Exception as e:
+            logger.error("tts_flush_failed", error=str(e))
 
     async def _connect(self):
         """Connect to the SageMaker endpoint and start the BiDi session."""
@@ -336,13 +354,6 @@ class DeepgramSageMakerTTSService(TTSService):
                     # Task finished with error or was already cancelled — fine
                     pass
 
-            # 4. Signal any waiting synthesis to stop
-            self._synthesizing = False
-            try:
-                self._audio_queue.put_nowait(None)
-            except asyncio.QueueFull:
-                pass
-
             logger.debug("tts_sagemaker_disconnected")
 
     async def _process_responses(self):
@@ -352,8 +363,14 @@ class DeepgramSageMakerTTSService(TTSService):
         - Binary audio chunks (PayloadPart with bytes)
         - JSON control messages (Flushed, Warning, Error, Close)
 
-        Audio chunks are placed into _audio_queue for run_tts() to consume.
-        A None sentinel is queued when a Flushed event is received.
+        Audio chunks are appended directly to the active turn's audio
+        context (append_to_audio_context()) so they flow through Pipecat's
+        per-turn Started/Stopped and ordering logic instead of a local
+        queue drained by run_tts(). A "Flushed" acknowledgement closes the
+        context (remove_audio_context()), which is what actually ends the
+        turn's TTSStartedFrame/TTSStoppedFrame pair -- this only happens
+        once per turn, when flush_audio() has been called and Deepgram
+        confirms all buffered text has been generated.
         """
         try:
             while self._client and self._client.is_active:
@@ -382,8 +399,14 @@ class DeepgramSageMakerTTSService(TTSService):
                         msg_type = parsed.get("type", "")
 
                         if msg_type == "Flushed":
-                            # All audio for the current Flush has been delivered
-                            await self._audio_queue.put(None)
+                            # All audio for the current turn's Flush has been
+                            # delivered. Close the audio context now -- this
+                            # is the ONE place a turn's context should end,
+                            # regardless of how many sentences it contained.
+                            context_id = self._active_context_id
+                            if context_id and self.audio_context_available(context_id):
+                                await self.remove_audio_context(context_id)
+                            self._active_context_id = None
 
                         elif msg_type == "Warning":
                             logger.warning(
@@ -396,8 +419,10 @@ class DeepgramSageMakerTTSService(TTSService):
                                 "deepgram_tts_error",
                                 err_msg=parsed.get("err_msg", ""),
                             )
-                            # Signal error to synthesis
-                            await self._audio_queue.put(None)
+                            context_id = self._active_context_id
+                            if context_id and self.audio_context_available(context_id):
+                                await self.remove_audio_context(context_id)
+                            self._active_context_id = None
 
                         elif msg_type == "Close":
                             logger.debug("deepgram_tts_connection_closed_by_server")
@@ -410,8 +435,17 @@ class DeepgramSageMakerTTSService(TTSService):
                         # Not JSON — this is raw audio data
                         pass
 
-                    # Queue audio data for run_tts() to consume
-                    await self._audio_queue.put(raw_bytes)
+                    context_id = self._active_context_id
+                    if context_id:
+                        await self.append_to_audio_context(
+                            context_id,
+                            TTSAudioRawFrame(
+                                audio=raw_bytes,
+                                sample_rate=self._sample_rate,
+                                num_channels=1,
+                                context_id=context_id,
+                            ),
+                        )
 
         except asyncio.CancelledError:
             logger.debug("tts_response_processor_cancelled")
@@ -438,29 +472,34 @@ class DeepgramSageMakerTTSService(TTSService):
                     error_type=type(e).__name__,
                     endpoint_name=self._endpoint_name,
                 )
-            # Signal error to any waiting synthesis
-            try:
-                self._audio_queue.put_nowait(None)
-            except asyncio.QueueFull:
-                pass
+            # Make sure a stuck turn's context still closes on error so the
+            # transport doesn't wait indefinitely for a TTSStoppedFrame.
+            context_id = self._active_context_id
+            if context_id and self.audio_context_available(context_id):
+                try:
+                    await self.append_to_audio_context(
+                        context_id, TTSStoppedFrame(context_id=context_id)
+                    )
+                    await self.remove_audio_context(context_id)
+                except Exception:
+                    pass
+            self._active_context_id = None
         finally:
             logger.debug("tts_response_processor_stopped")
 
-    async def handle_interruption(self):
+    async def on_audio_context_interrupted(self, context_id: str):
         """Handle barge-in by clearing the Deepgram text buffer.
 
-        Called when the user starts speaking during TTS playback.
-        Sends a Clear message to discard any queued text.
+        Called by the base class when the user starts speaking during TTS
+        playback (see TTSService._handle_interruption()). Sends a Clear
+        message to discard any queued/generating text for the interrupted
+        context.
         """
         if self._client and self._client.is_active:
             try:
                 await self._client.send_json({"type": "Clear"})
-                self._synthesizing = False
-                # Drain the audio queue
-                while not self._audio_queue.empty():
-                    try:
-                        self._audio_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
             except Exception as e:
                 logger.debug("tts_clear_message_failed", error=str(e))
+        if self._active_context_id == context_id:
+            self._active_context_id = None
+        await super().on_audio_context_interrupted(context_id)
