@@ -176,6 +176,8 @@ Request these quotas in the [Service Quotas console](https://console.aws.amazon.
 
 Quota increases can take 24-48 hours for GPU instances.
 
+> **Capacity fallback:** The STT and TTS endpoint configs use SageMaker [instance pools](https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-heterogeneous.html) to fall back automatically on `InsufficientInstanceCapacity`: STT tries `g6.2xlarge` -> `g6e.2xlarge` -> `g5.2xlarge` -> `g4dn.2xlarge`; TTS tries `g6.12xlarge` -> `g6e.12xlarge` -> `g5.12xlarge` -> `g4dn.12xlarge`. Requesting quota for just the `g6` types above is enough to deploy, but if `us-east-1` is capacity-constrained, request quota for the fallback types too (`g6e`, `g5`, `g4dn` in the matching sizes) so the fallback can actually succeed. See [Troubleshooting](../docs/reference/troubleshooting.md#gpu-capacity-errors-insufficientinstancecapacity) for details.
+
 #### Deepgram Marketplace Subscriptions
 
 Subscribe to Deepgram model packages on AWS Marketplace. See the [Deepgram Marketplace Setup Guide](../docs/reference/deepgram-marketplace-setup.md) for detailed step-by-step instructions.
