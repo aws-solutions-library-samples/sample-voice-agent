@@ -45,25 +45,46 @@ describe('SageMakerStack', () => {
     });
   });
 
-  it('should create STT endpoint config with g6.2xlarge instance', () => {
+  it('should create STT endpoint config with instance pools, g6.2xlarge as top priority', () => {
     template.hasResourceProperties('AWS::SageMaker::EndpointConfig', {
       EndpointConfigName: Match.stringLikeRegexp('stt-config'),
       ProductionVariants: Match.arrayWith([
         Match.objectLike({
-          InstanceType: 'ml.g6.2xlarge',
           VariantName: 'AllTraffic',
+          InstancePools: [
+            Match.objectLike({ InstanceType: 'ml.g6.2xlarge', Priority: 1 }),
+            Match.objectLike({ InstanceType: 'ml.g6e.2xlarge', Priority: 2 }),
+            Match.objectLike({ InstanceType: 'ml.g5.2xlarge', Priority: 3 }),
+            Match.objectLike({ InstanceType: 'ml.g4dn.2xlarge', Priority: 4 }),
+          ],
         }),
       ]),
     });
   });
 
-  it('should create TTS endpoint config with g6.12xlarge instance', () => {
+  it('should create TTS endpoint config with instance pools, g6.12xlarge as top priority', () => {
     template.hasResourceProperties('AWS::SageMaker::EndpointConfig', {
       EndpointConfigName: Match.stringLikeRegexp('tts-config'),
       ProductionVariants: Match.arrayWith([
         Match.objectLike({
-          InstanceType: 'ml.g6.12xlarge',
           VariantName: 'AllTraffic',
+          InstancePools: [
+            Match.objectLike({ InstanceType: 'ml.g6.12xlarge', Priority: 1 }),
+            Match.objectLike({ InstanceType: 'ml.g6e.12xlarge', Priority: 2 }),
+            Match.objectLike({ InstanceType: 'ml.g5.12xlarge', Priority: 3 }),
+            Match.objectLike({ InstanceType: 'ml.g4dn.12xlarge', Priority: 4 }),
+          ],
+        }),
+      ]),
+    });
+  });
+
+  it('should not use a single fixed InstanceType for STT/TTS variants (would reintroduce ICE risk)', () => {
+    template.hasResourceProperties('AWS::SageMaker::EndpointConfig', {
+      ProductionVariants: Match.arrayWith([
+        Match.objectLike({
+          VariantName: 'AllTraffic',
+          InstanceType: Match.absent(),
         }),
       ]),
     });
