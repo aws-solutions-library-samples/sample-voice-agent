@@ -147,6 +147,21 @@ graph TB
 
 ~$135-200/mo (Cloud API) or ~$935-1,200/mo (SageMaker mode with GPU instances). [Full breakdown →](docs/reference/cost-estimation.md)
 
+## Observability
+
+Every run emits structured CloudWatch metrics automatically — no extra infra needed:
+
+- **Latency** — end-to-end time from user speech ending to bot audio starting
+- **STT quality** — confidence scores (avg/min), word and interim-transcript counts per turn
+- **LLM quality** — output token count and tokens/sec
+- **Turn-taking flow** — turn gaps, speaking durations, response delay
+- **Barge-in count** — how often the user talks over the bot mid-response
+- **Composite quality score** — single 0.0–1.0 score weighted across latency, audio, STT confidence, flow, and network
+
+Optional: full conversation logging (`ENABLE_CONVERSATION_LOGGING=true`) and a call flow visualizer for timeline debugging.
+
+All metrics ship as CloudWatch EMF logs — queryable immediately, no dashboard setup required. See `backend/voice-agent/app/observability.py` and `docs/features/comprehensive-observability-metrics/`.
+
 ## Next Steps
 
 | What | How |
